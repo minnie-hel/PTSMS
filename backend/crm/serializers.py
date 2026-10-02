@@ -54,6 +54,7 @@ class LeadSerializer(serializers.ModelSerializer):
     )
     destination_names = serializers.SerializerMethodField()
     client_reference = serializers.CharField(source="converted_client.reference", read_only=True)
+    contact_channel_label = serializers.CharField(source="get_contact_channel_display", read_only=True)
 
     class Meta:
         model = Lead
@@ -64,6 +65,8 @@ class LeadSerializer(serializers.ModelSerializer):
             "email",
             "phone",
             "whatsapp",
+            "contact_channel",
+            "contact_channel_label",
             "country",
             "city",
             "travel_date",
@@ -105,16 +108,32 @@ class LeadSerializer(serializers.ModelSerializer):
         validated["created_by"] = self.context["request"].user
         lead = Lead.objects.create(**validated)
         lead.destinations.set(destinations)
+        Activity.objects.create(
+            lead=lead,
+            activity_type=Activity.Type.NOTE,
+            body="Lead created.",
+            created_by=self.context["request"].user,
+        )
         return lead
 
     @transaction.atomic
     def update(self, instance, validated):
         destinations = validated.pop("destinations", None)
+        previous_status = instance.status
         for key, value in validated.items():
             setattr(instance, key, value)
         instance.save()
         if destinations is not None:
             instance.destinations.set(destinations)
+        new_status = validated.get("status")
+        if new_status and new_status != previous_status:
+            previous_label = Lead.Status(previous_status).label
+            Activity.objects.create(
+                lead=instance,
+                activity_type=Activity.Type.NOTE,
+                body=f"Status changed from {previous_label} to {instance.get_status_display()}.",
+                created_by=self.context["request"].user,
+            )
         return instance
 
 

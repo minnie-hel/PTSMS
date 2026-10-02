@@ -12,6 +12,7 @@ export function ModuleCard({
   tone = "navy",
   to,
   onClick,
+  valueVariant,
 }: {
   icon: ReactNode
   label: string
@@ -19,12 +20,14 @@ export function ModuleCard({
   tone?: Tone
   to?: string
   onClick?: () => void
+  /** Use "money" for currency amounts so they stay readable on dashboard cards. */
+  valueVariant?: "money" | "default"
 }) {
   const body = (
     <>
       <span className="mc-icon">{icon}</span>
       <span className="mc-label">{label}</span>
-      <span className="mc-value">{value}</span>
+      <span className={`mc-value${valueVariant === "money" ? " money" : ""}`}>{value}</span>
       <span className="mc-arrow"><IconArrowRight /></span>
     </>
   )

@@ -8,10 +8,16 @@ type CompanyValue = {
   refresh: () => Promise<void>
 }
 
+/** Shown when no logo or company name is stored yet (e.g. fresh install). */
+export const DEFAULT_BRAND_NAME = "Paul Tours Safari"
+
 const emptyCompany: CompanyProfile = {
   name: "",
   email: "",
   phone: "",
+  city: "",
+  country: "",
+  vrn_number: "",
   address: "",
   tagline: "",
   welcome_title: "",
@@ -24,6 +30,18 @@ const emptyCompany: CompanyProfile = {
   logo_wide_dark_url: "",
   primary_color: "",
   secondary_color: "",
+  tin_number: "",
+  bank_account_name: "",
+  bank_account_number: "",
+  bank_iban: "",
+  bank_swift: "",
+  bank_name: "",
+  bank_branch: "",
+  bank_branch_code: "",
+  bank_correspondent: "",
+  bank_correspondent_swift: "",
+  invoice_terms: "",
+  invoice_footer: "",
 }
 
 const CompanyContext = createContext<CompanyValue | null>(null)
@@ -102,10 +120,11 @@ export function CompanyMark({ large, compact }: { large?: boolean; compact?: boo
   const { company } = useCompany()
   if (company.logo_url) {
     const className = large ? "brand-logo brand-logo-lg" : compact ? "brand-logo brand-logo-side" : "brand-logo"
-    return <LogoImage className={className} />
+    return <LogoImage className={className} key={company.logo_url} />
   }
-  if (!company.name) return null
-  return <strong>{company.name}</strong>
+  const label = company.name || DEFAULT_BRAND_NAME
+  const className = large ? "brand-text brand-text-lg" : compact ? "brand-text brand-text-side" : "brand-text"
+  return <strong className={className}>{label}</strong>
 }
 
 export function DocumentCompanyLine() {

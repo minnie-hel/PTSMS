@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom"
+import { Navigate, Outlet, Route, Routes } from "react-router-dom"
 import { useAuth } from "./auth"
 import { Guard, Shell } from "./ui"
 import { LoginPage } from "./pages/Login"
@@ -14,6 +14,7 @@ import {
   InvoicesPage,
   ItinerariesPage,
   ItineraryDetailPage,
+  HotelPaymentsPage,
   PaymentsPage,
   ProfitPage,
   QuotationDetailPage,
@@ -40,13 +41,20 @@ export default function App() {
         <Route path="/itineraries" element={<Guard code="itineraries.view"><ItinerariesPage /></Guard>} />
         <Route path="/itineraries/:id" element={<Guard code="itineraries.view"><ItineraryDetailPage /></Guard>} />
         <Route path="/pipeline" element={<Guard code="quotations.view"><PipelinePage /></Guard>} />
-        <Route path="/bookings" element={<Guard code="bookings.view"><BookingsPage /></Guard>} />
-        <Route path="/bookings/:id" element={<Guard code="bookings.view"><BookingPage /></Guard>} />
+        <Route path="/bookings" element={<Guard code="bookings.view"><Outlet /></Guard>}>
+          <Route index element={<BookingsPage />} />
+          <Route path="upcoming" element={<BookingsPage listPreset="upcoming" />} />
+          <Route path="in-progress" element={<BookingsPage listPreset="in_progress" />} />
+          <Route path="completed" element={<BookingsPage listPreset="completed" />} />
+          <Route path="new" element={<BookingPage />} />
+          <Route path=":id" element={<BookingPage />} />
+        </Route>
         <Route path="/operations" element={<Guard code="operations.view"><OperationsPage /></Guard>} />
         <Route path="/vendors" element={<Guard code="vendors.view"><VendorsPage /></Guard>} />
         <Route path="/invoices" element={<Guard code="invoices.view"><InvoicesPage /></Guard>} />
         <Route path="/invoices/:id" element={<Guard code="invoices.view"><InvoiceDetailPage /></Guard>} />
         <Route path="/payments" element={<Guard code="payments.view"><PaymentsPage /></Guard>} />
+        <Route path="/hotel-payments" element={<Guard code="costs.view"><HotelPaymentsPage /></Guard>} />
         <Route path="/expenses" element={<Guard code="expenses.view"><ExpensesPage /></Guard>} />
         <Route path="/cashbook" element={<Guard code="cashbook.view"><CashbookPage /></Guard>} />
         <Route path="/profit" element={<Guard code="profitability.view"><ProfitPage /></Guard>} />

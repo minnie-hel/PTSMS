@@ -6,15 +6,23 @@ from catalog.models import ClientType, Currency, Destination, LeadSource, Safari
 
 class Lead(models.Model):
     class Status(models.TextChoices):
-        NEW = "new", "New"
-        CONTACTED = "contacted", "Contacted"
+        NEW = "new", "New inquiry"
+        CONTACTED = "contacted", "In contact"
         QUALIFIED = "qualified", "Qualified"
-        QUOTATION_SENT = "quotation_sent", "Quotation Sent"
-        FOLLOW_UP = "follow_up", "Follow-up"
-        NEGOTIATION = "negotiation", "Negotiation"
-        WON = "won", "Won"
+        QUOTATION_SENT = "quotation_sent", "Quotation sent"
+        FOLLOW_UP = "follow_up", "Follow-up needed"
+        NEGOTIATION = "negotiation", "Negotiating"
+        WON = "won", "Won — booking opened"
         LOST = "lost", "Lost"
-        UNQUALIFIED = "unqualified", "Unqualified"
+        UNQUALIFIED = "unqualified", "Not a fit"
+
+    class ContactChannel(models.TextChoices):
+        EMAIL = "email", "Email"
+        WHATSAPP = "whatsapp", "WhatsApp"
+        PHONE = "phone", "Phone call"
+        WEBSITE = "website", "Website / form"
+        REFERRAL = "referral", "Referral"
+        OTHER = "other", "Other"
 
     class Priority(models.TextChoices):
         LOW = "low", "Low"
@@ -26,6 +34,7 @@ class Lead(models.Model):
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=40, blank=True)
     whatsapp = models.CharField(max_length=40, blank=True)
+    contact_channel = models.CharField(max_length=20, choices=ContactChannel.choices, blank=True)
     country = models.CharField(max_length=80, blank=True)
     city = models.CharField(max_length=80, blank=True)
     travel_date = models.DateField(null=True, blank=True)

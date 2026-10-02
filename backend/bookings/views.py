@@ -3,9 +3,9 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from accounts.permissions import HasCode
-from bookings.models import Activity, Booking, Itinerary, Quotation
-from bookings.serializers import BookingSerializer, ItinerarySerializer, QuotationSerializer
+from accounts.permissions import HasAnyCode, HasCode
+from bookings.models import Accommodation, Activity, Booking, Itinerary, Quotation
+from bookings.serializers import AccommodationSerializer, BookingSerializer, ItinerarySerializer, QuotationSerializer
 from common.audit import audit
 from common.mixins import AuditMixin, ProtectedDestroyMixin
 from crm.models import Lead
@@ -17,13 +17,14 @@ class BookingViewSet(AuditMixin, ProtectedDestroyMixin, viewsets.ModelViewSet):
     read_permission = "bookings.view"
     write_permission = "bookings.manage"
     search_fields = ["reference", "client__full_name", "client__country", "notes"]
-    filterset_fields = ["overall_status", "safari_type", "client", "currency", "assigned_to"]
+    filterset_fields = ["overall_status", "safari_status", "safari_type", "client", "currency", "assigned_to"]
     ordering_fields = ["booking_date", "start_date", "reference"]
 
     def get_queryset(self):
         qs = Booking.objects.select_related(
             "client", "currency", "safari_type", "assigned_to", "lead", "itinerary"
         ).prefetch_related(
+            "travellers",
             "destinations",
             "accommodations__vendor",
             "accommodations__hotel",
@@ -37,6 +38,21 @@ class BookingViewSet(AuditMixin, ProtectedDestroyMixin, viewsets.ModelViewSet):
         if self.request.query_params.get("operations") == "1":
             qs = qs.filter(overall_status__in=[Booking.Overall.CONFIRMED, Booking.Overall.ACTIVE])
         return qs
+
+
+class AccommodationViewSet(viewsets.ReadOnlyModelViewSet):
+    """Hotel stays for vendor payment forms and finance lists."""
+
+    serializer_class = AccommodationSerializer
+    permission_classes = [HasAnyCode]
+    any_permissions = ["costs.view", "bookings.view", "bookings.edit"]
+    filterset_fields = ["booking", "vendor"]
+    search_fields = ["booking__reference", "vendor__name", "hotel__name"]
+
+    def get_queryset(self):
+        return Accommodation.objects.select_related(
+            "booking", "vendor", "hotel", "cost_currency"
+        ).prefetch_related("vendor_payments")
 
 
 class QuotationViewSet(AuditMixin, ProtectedDestroyMixin, viewsets.ModelViewSet):

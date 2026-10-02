@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { Link, useNavigate, useParams } from "react-router-dom"
 import { api, apiList, emptyToNull } from "../api"
 import { useAuth } from "../auth"
 import { DocumentCompanyLine } from "../company"
-import { Badge, Banner, money, moneyList, Modal, PageTitle } from "../ui"
-import { DetailModal, EmptyRow, FilterSelect, ListToolbar, RecordForm, RowActions, useList } from "../lists"
+import { Badge, Banner, Field, money, Modal, PageTitle } from "../ui"
+import { InvoiceDocument, ScreenToolbar, type InvoiceDoc } from "../documents"
+import { exportInvoiceDocument, exportTable } from "../export"
+import { DetailModal, EmptyRow, ListToolbar, RecordForm, RowActions, useClientPagination, useListScreen, type ListFilterField } from "../lists"
+import { INVOICE_STATUS_TABS, ITINERARY_STATUS_TABS, QUOTATION_STATUS_TABS, VENDOR_STATUS_TABS, monthFilterField } from "../listTabs"
+import { crudSuccessMessage, useToast } from "../toast"
 
 type Row = Record<string, unknown> & { id: number }
 type Choice = { value: string | number; label: string }
@@ -12,11 +16,38 @@ type Choice = { value: string | number; label: string }
 /** Loads the rows of a small reference list (bookings, currencies, ...) for form selects. */
 function useChoices(path: string, label: (row: Row) => string, enabled = true) {
   const [rows, setRows] = useState<Row[]>([])
+  const [loadError, setLoadError] = useState("")
+  const [loading, setLoading] = useState(false)
   useEffect(() => {
-    if (enabled) apiList<Row>(path).then(setRows).catch(() => setRows([]))
+    if (!enabled) return
+    setLoadError("")
+    setLoading(true)
+    apiList<Row>(path)
+      .then(setRows)
+      .catch((err: Error) => {
+        setRows([])
+        setLoadError(err.message)
+      })
+      .finally(() => setLoading(false))
   }, [path, enabled])
-  const choices: Choice[] = useMemo(() => rows.map((row) => ({ value: row.id, label: label(row) })), [rows])
-  return { rows, choices }
+  const choices: Choice[] = useMemo(() => rows.map((row) => ({ value: row.id, label: label(row) })), [rows, label])
+  return { rows, choices, loadError, loading }
+}
+
+function invoiceChoiceLabel(row: Row) {
+  const status = String(row.status)
+  const hint = status === "draft" ? " · send before paying" : ""
+  return `${String(row.number)} · ${String(row.client_name)} · balance ${money(row.balance as string, String(row.currency_code))}${hint}`
+}
+
+function payableInvoice(row: Row) {
+  if (String(row.status) === "cancelled") return false
+  const balance = Number(row.balance)
+  return Number.isFinite(balance) && balance > 0
+}
+
+function stayChoiceLabel(row: Row) {
+  return `${String(row.booking_reference || row.booking)} · ${String(row.vendor_name || row.property_name)} · ${String(row.check_in)} – ${String(row.check_out || "")}`
 }
 
 const bookingLabel = (row: Row) => `${String(row.reference)} · ${String(row.client_name || "")}`
@@ -25,11 +56,17 @@ const nameLabel = (row: Row) => String(row.name)
 
 /* ------------------------------------------------------------ quotations */
 
+const QUOTATION_FILTERS: ListFilterField[] = [monthFilterField()]
+
 export function QuotationsPage() {
   const { can } = useAuth()
-  const [search, setSearch] = useState("")
-  const [status, setStatus] = useState("")
-  const { rows, loading, error, load, remove } = useList<Row>("/api/quotations/", search, { status })
+  const screen = useListScreen<Row>("/api/quotations/", {
+    statusKey: "status",
+    statusTabs: QUOTATION_STATUS_TABS,
+    filterFields: QUOTATION_FILTERS,
+    dateKey: "created_at",
+  })
+  const { rows, loading, error, load, remove } = screen
   const [editing, setEditing] = useState<Row | "new" | null>(null)
   const bookings = useChoices("/api/bookings/?page_size=200", bookingLabel, editing === "new")
 
@@ -38,35 +75,41 @@ export function QuotationsPage() {
       <PageTitle title="Quotations" lede="The fee sent to the client. Hotel costs are not on this document." />
       <Banner>{error}</Banner>
       <ListToolbar
-        search={search}
-        onSearch={setSearch}
-        placeholder="Search number, client or booking"
-        createLabel={can("quotations.create") ? "New quotation" : undefined}
+        statusTabs={QUOTATION_STATUS_TABS}
+        activeStatusTab={screen.statusTab}
+        onStatusTabChange={screen.setStatusTab}
+        tabCounts={screen.tabCounts}
+        page={screen.page}
+        pageSize={screen.pageSize}
+        total={screen.total}
+        onPageChange={screen.setPage}
+        filterFields={QUOTATION_FILTERS}
+        filterValues={screen.filters}
+        onFilterChange={screen.setFilter}
+        createLabel={can("quotations.create") ? "Add new" : undefined}
         onCreate={() => setEditing("new")}
-        filters={<FilterSelect value={status} onChange={setStatus} label="All statuses" options={["draft", "sent", "accepted", "declined"].map((item) => ({ value: item, label: item }))} />}
       />
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Number</th><th>Client</th><th>Booking</th><th>Fee</th><th>Status</th><th className="actions-col">Actions</th></tr></thead>
+          <thead><tr><th>Quotation</th><th>Client</th><th>Fee</th><th>Status</th><th className="actions-col">Actions</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
                 <td><Link to={`/quotations/${row.id}`}>{String(row.number)}</Link></td>
                 <td>{String(row.client_name)}</td>
-                <td>{String(row.booking_reference)}</td>
                 <td>{money(row.total_amount as string, String(row.currency_code))}</td>
                 <td><Badge value={String(row.status)} label={String(row.status_label)} /></td>
                 <td>
                   <RowActions
                     viewTo={`/quotations/${row.id}`}
                     onEdit={can("quotations.edit") ? () => setEditing(row) : undefined}
-                    onDelete={can("quotations.delete") ? () => remove(row.id) : undefined}
+                    onDelete={can("quotations.delete") ? async () => { await remove(row.id) } : undefined}
                     deleteName={String(row.number)}
                   />
                 </td>
               </tr>
             ))}
-            {!loading && rows.length === 0 ? <EmptyRow colSpan={6}>No quotations match.</EmptyRow> : null}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={5}>No quotations match.</EmptyRow> : null}
           </tbody>
         </table>
       </div>
@@ -102,6 +145,7 @@ export function QuotationsPage() {
             setEditing(null)
             load()
           }}
+          successMessage={crudSuccessMessage(editing === "new")}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -111,27 +155,98 @@ export function QuotationsPage() {
 
 export function QuotationDetailPage() {
   const { id } = useParams()
+  const { can } = useAuth()
+  const navigate = useNavigate()
   const [row, setRow] = useState<Row | null>(null)
-  useEffect(() => { api<Row>(`/api/quotations/${id}/`).then(setRow) }, [id])
+  const [booking, setBooking] = useState<Row | null>(null)
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+
+  function load() {
+    api<Row>(`/api/quotations/${id}/`).then((quote) => {
+      setRow(quote)
+      api<Row>(`/api/bookings/${quote.booking}/`).then(setBooking).catch(() => setBooking(null))
+    })
+  }
+  useEffect(() => { load() }, [id])
+
+  async function run(path: string) {
+    setBusy(true)
+    setError("")
+    try {
+      await api(path, { method: "POST", body: "{}" })
+      load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That step failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createItinerary() {
+    if (!row) return
+    setBusy(true)
+    setError("")
+    try {
+      const itinerary = await api<{ id: number }>("/api/itineraries/", {
+        method: "POST",
+        body: JSON.stringify({ booking: row.booking, notes: "Prepared from the accepted quotation." }),
+      })
+      navigate(`/itineraries/${itinerary.id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the itinerary")
+      setBusy(false)
+    }
+  }
+
   if (!row) return <p>Loading quotation…</p>
+  const accepted = row.status === "accepted"
+  const hasItinerary = Boolean(booking?.itinerary_id)
+
   return (
-    <article className="sheet">
-      <header>
-        <div>
-          <DocumentCompanyLine />
-          <h2>Quotation {String(row.number)}</h2>
+    <div className="page-document">
+      <ScreenToolbar backTo="/quotations" backLabel="Quotations" onPrint={() => window.print()} />
+      <Banner>{error}</Banner>
+      <article className="sheet">
+        <header>
+          <div>
+            <DocumentCompanyLine />
+            <h2>Quotation {String(row.number)}</h2>
+          </div>
+        </header>
+        <p>Client {String(row.client_name)}</p>
+        <p>Booking {String(row.booking_reference)} · {String(row.start_date)} to {String(row.end_date)}</p>
+        <p>Destinations {(row.destination_names as string[] | undefined)?.join(", ") || "—"}</p>
+        <p><strong>Total fee {money(row.total_amount as string, String(row.currency_code))}</strong></p>
+        <p>Valid until {String(row.validity_date || "—")}</p>
+        <p>{String(row.terms || "")}</p>
+        <p><Badge value={String(row.status)} label={String(row.status_label)} /></p>
+        <p className="muted">This quotation states the safari fee. It does not show what the company pays the hotels.</p>
+      </article>
+      <div className="card workflow-steps no-print">
+        <h2>Next step</h2>
+        <ol className="workflow-list">
+          <li className={accepted ? "done" : ""}>Client accepts the quotation</li>
+          <li className={hasItinerary ? "done" : ""}>Create the itinerary</li>
+          <li>Create the invoice and send it to the client</li>
+        </ol>
+        <div className="form-footer">
+          {can("quotations.edit") && row.status !== "accepted" ? (
+            <>
+              {row.status !== "sent" && row.status !== "accepted" ? (
+                <button type="button" className="button" disabled={busy} onClick={() => run(`/api/quotations/${row.id}/send/`)}>Send to client</button>
+              ) : null}
+              <button type="button" className="button primary" disabled={busy} onClick={() => run(`/api/quotations/${row.id}/accept/`)}>Mark accepted</button>
+            </>
+          ) : null}
+          {accepted && !hasItinerary && can("itineraries.create") ? (
+            <button type="button" className="primary" disabled={busy} onClick={createItinerary}>Create itinerary</button>
+          ) : null}
+          {hasItinerary ? <Link className="button primary" to={`/itineraries/${booking?.itinerary_id}`}>Open itinerary</Link> : null}
+          <Link className="button ghost" to="/quotations">Back to list</Link>
         </div>
-        <button className="no-print" type="button" onClick={() => window.print()}>Print</button>
-      </header>
-      <p>Client {String(row.client_name)}</p>
-      <p>Booking {String(row.booking_reference)} · {String(row.start_date)} to {String(row.end_date)}</p>
-      <p>Destinations {(row.destination_names as string[] | undefined)?.join(", ") || "—"}</p>
-      <p><strong>Total fee {money(row.total_amount as string, String(row.currency_code))}</strong></p>
-      <p>Valid until {String(row.validity_date || "—")}</p>
-      <p>{String(row.terms || "")}</p>
-      <p><Badge value={String(row.status)} label={String(row.status_label)} /></p>
-      <p className="muted">This quotation states the safari fee. It does not show what the company pays the hotels.</p>
-    </article>
+      </div>
+    </div>
   )
 }
 
@@ -139,9 +254,13 @@ export function QuotationDetailPage() {
 
 export function ItinerariesPage() {
   const { can } = useAuth()
-  const [search, setSearch] = useState("")
-  const [status, setStatus] = useState("")
-  const { rows, loading, error, load, remove } = useList<Row>("/api/itineraries/", search, { status })
+  const screen = useListScreen<Row>("/api/itineraries/", {
+    statusKey: "status",
+    statusTabs: ITINERARY_STATUS_TABS,
+    filterFields: [monthFilterField()],
+    dateKey: "created_at",
+  })
+  const { rows, loading, error, load, remove } = screen
   const [editing, setEditing] = useState<Row | "new" | null>(null)
   const bookings = useChoices("/api/bookings/?page_size=200", bookingLabel, editing === "new")
 
@@ -150,35 +269,40 @@ export function ItinerariesPage() {
       <PageTitle title="Itineraries" lede="Sent after the quotation is accepted." />
       <Banner>{error}</Banner>
       <ListToolbar
-        search={search}
-        onSearch={setSearch}
-        placeholder="Search number, client or booking"
-        createLabel={can("itineraries.create") ? "New itinerary" : undefined}
+        statusTabs={ITINERARY_STATUS_TABS}
+        activeStatusTab={screen.statusTab}
+        onStatusTabChange={screen.setStatusTab}
+        tabCounts={screen.tabCounts}
+        page={screen.page}
+        pageSize={screen.pageSize}
+        total={screen.total}
+        onPageChange={screen.setPage}
+        filterFields={[monthFilterField()]}
+        filterValues={screen.filters}
+        onFilterChange={screen.setFilter}
+        createLabel={can("itineraries.create") ? "Add new" : undefined}
         onCreate={() => setEditing("new")}
-        filters={<FilterSelect value={status} onChange={setStatus} label="All statuses" options={[{ value: "draft", label: "Draft" }, { value: "sent", label: "Sent" }]} />}
       />
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Number</th><th>Client</th><th>Booking</th><th>Journey</th><th>Status</th><th className="actions-col">Actions</th></tr></thead>
+          <thead><tr><th>Itinerary</th><th>Client</th><th>Status</th><th className="actions-col">Actions</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
                 <td><Link to={`/itineraries/${row.id}`}>{String(row.number)}</Link></td>
                 <td>{String(row.client_name)}</td>
-                <td>{String(row.booking_reference)}</td>
-                <td>{String(row.start_date)} – {String(row.end_date)}</td>
                 <td><Badge value={String(row.status)} label={String(row.status_label)} /></td>
                 <td>
                   <RowActions
                     viewTo={`/itineraries/${row.id}`}
                     onEdit={can("itineraries.edit") ? () => setEditing(row) : undefined}
-                    onDelete={can("itineraries.delete") ? () => remove(row.id) : undefined}
+                    onDelete={can("itineraries.delete") ? async () => { await remove(row.id) } : undefined}
                     deleteName={String(row.number)}
                   />
                 </td>
               </tr>
             ))}
-            {!loading && rows.length === 0 ? <EmptyRow colSpan={6}>No itineraries match.</EmptyRow> : null}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={4}>No itineraries match.</EmptyRow> : null}
           </tbody>
         </table>
       </div>
@@ -197,6 +321,7 @@ export function ItinerariesPage() {
             setEditing(null)
             load()
           }}
+          successMessage={crudSuccessMessage(editing === "new")}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -206,38 +331,122 @@ export function ItinerariesPage() {
 
 export function ItineraryDetailPage() {
   const { id } = useParams()
+  const { can } = useAuth()
+  const navigate = useNavigate()
   const [row, setRow] = useState<Row | null>(null)
-  useEffect(() => { api<Row>(`/api/itineraries/${id}/`).then(setRow) }, [id])
+  const [booking, setBooking] = useState<Row | null>(null)
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [invoiceDates, setInvoiceDates] = useState({ invoice_date: new Date().toISOString().slice(0, 10), due_date: "" })
+
+  function load() {
+    api<Row>(`/api/itineraries/${id}/`).then((itinerary) => {
+      setRow(itinerary)
+      api<Row>(`/api/bookings/${itinerary.booking}/`).then(setBooking).catch(() => setBooking(null))
+    })
+  }
+  useEffect(() => { load() }, [id])
+
+  async function markSent() {
+    setBusy(true)
+    setError("")
+    try {
+      await api(`/api/itineraries/${id}/send/`, { method: "POST", body: "{}" })
+      load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update the itinerary")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createInvoice() {
+    if (!row) return
+    setBusy(true)
+    setError("")
+    try {
+      const invoice = await api<{ id: number }>("/api/invoices/", {
+        method: "POST",
+        body: JSON.stringify({
+          booking: row.booking,
+          invoice_date: invoiceDates.invoice_date,
+          due_date: invoiceDates.due_date || invoiceDates.invoice_date,
+        }),
+      })
+      navigate(`/invoices/${invoice.id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the invoice")
+      setBusy(false)
+    }
+  }
+
   if (!row) return <p>Loading itinerary…</p>
   const stays = (row.stays as { property: string; vendor: string; check_in: string; check_out: string; nights: number }[]) || []
+  const sent = row.status === "sent"
+  const hasInvoice = Boolean(booking?.invoice_id)
+
   return (
-    <article className="sheet">
-      <header>
-        <div>
-          <DocumentCompanyLine />
-          <h2>Itinerary {String(row.number)}</h2>
+    <div className="page-document">
+      <ScreenToolbar backTo="/itineraries" backLabel="Itineraries" onPrint={() => window.print()} />
+      <Banner>{error}</Banner>
+      <article className="sheet">
+        <header>
+          <div>
+            <DocumentCompanyLine />
+            <h2>Itinerary {String(row.number)}</h2>
+          </div>
+        </header>
+        <p><Badge value={String(row.status)} label={String(row.status_label)} /></p>
+        <p>{String(row.client_name)} · {String(row.booking_reference)}</p>
+        <p>Journey {String(row.start_date)} to {String(row.end_date)} · {String(row.safari_days)} days</p>
+        <p>Places {(row.destination_names as string[]).join(", ") || "—"}</p>
+        {stays.map((stay) => (
+          <p key={`${stay.property}-${stay.check_in}`}>{stay.check_in} – {stay.check_out} · {stay.property} ({stay.vendor}) · {stay.nights} nights</p>
+        ))}
+        <p><strong>Total {money(row.total_amount as string, String(row.currency_code))}</strong></p>
+        <p>{String(row.notes || "")}</p>
+      </article>
+      <div className="card workflow-steps no-print">
+        <h2>Next step</h2>
+        <ol className="workflow-list">
+          <li className={sent ? "done" : ""}>Client accepts the itinerary (mark sent)</li>
+          <li className={hasInvoice ? "done" : ""}>Create the invoice</li>
+          <li>Print or export the invoice for the client</li>
+        </ol>
+        {!sent && can("itineraries.edit") ? (
+          <button type="button" className="button primary" disabled={busy} onClick={markSent}>Mark itinerary accepted / sent</button>
+        ) : null}
+        {sent && !hasInvoice && can("invoices.create") ? (
+          <div className="form-grid" style={{ marginTop: 12 }}>
+            <Field label="Invoice date"><input type="date" value={invoiceDates.invoice_date} onChange={(e) => setInvoiceDates({ ...invoiceDates, invoice_date: e.target.value })} /></Field>
+            <Field label="Due date"><input type="date" value={invoiceDates.due_date} onChange={(e) => setInvoiceDates({ ...invoiceDates, due_date: e.target.value })} /></Field>
+          </div>
+        ) : null}
+        <div className="form-footer">
+          {sent && !hasInvoice && can("invoices.create") ? (
+            <button type="button" className="primary" disabled={busy} onClick={createInvoice}>Create invoice</button>
+          ) : null}
+          {hasInvoice ? <Link className="button primary" to={`/invoices/${booking?.invoice_id}`}>Open invoice (print / export)</Link> : null}
+          <Link className="button ghost" to="/itineraries">Back to list</Link>
         </div>
-        <button className="no-print" type="button" onClick={() => window.print()}>Print</button>
-      </header>
-      <p>{String(row.client_name)} · {String(row.booking_reference)}</p>
-      <p>Journey {String(row.start_date)} to {String(row.end_date)} · {String(row.safari_days)} days</p>
-      <p>Places {(row.destination_names as string[]).join(", ") || "—"}</p>
-      {stays.map((stay) => (
-        <p key={`${stay.property}-${stay.check_in}`}>{stay.check_in} – {stay.check_out} · {stay.property} ({stay.vendor}) · {stay.nights} nights</p>
-      ))}
-      <p><strong>Total {money(row.total_amount as string, String(row.currency_code))}</strong></p>
-      <p>{String(row.notes || "")}</p>
-    </article>
+      </div>
+    </div>
   )
 }
 
 /* ---------------------------------------------------------------- invoices */
 
+const INVOICE_FILTERS: ListFilterField[] = [monthFilterField("Invoice month")]
+
 export function InvoicesPage() {
   const { can } = useAuth()
-  const [search, setSearch] = useState("")
-  const [status, setStatus] = useState("")
-  const { rows, loading, error, load, remove } = useList<Row>("/api/invoices/", search, { status })
+  const screen = useListScreen<Row>("/api/invoices/", {
+    statusKey: "status",
+    statusTabs: INVOICE_STATUS_TABS,
+    filterFields: INVOICE_FILTERS,
+    dateKey: "invoice_date",
+  })
+  const { rows, loading, error, load, remove, allRows } = screen
   const [editing, setEditing] = useState<Row | "new" | null>(null)
   const bookings = useChoices("/api/bookings/?page_size=200", bookingLabel, editing === "new")
 
@@ -246,36 +455,50 @@ export function InvoicesPage() {
       <PageTitle title="Invoices" lede="Issued after the itinerary. No VAT." />
       <Banner>{error}</Banner>
       <ListToolbar
-        search={search}
-        onSearch={setSearch}
-        placeholder="Search number, client or booking"
-        createLabel={can("invoices.create") ? "New invoice" : undefined}
+        statusTabs={INVOICE_STATUS_TABS}
+        activeStatusTab={screen.statusTab}
+        onStatusTabChange={screen.setStatusTab}
+        tabCounts={screen.tabCounts}
+        page={screen.page}
+        pageSize={screen.pageSize}
+        total={screen.total}
+        onPageChange={screen.setPage}
+        filterFields={INVOICE_FILTERS}
+        filterValues={screen.filters}
+        onFilterChange={screen.setFilter}
+        createLabel={can("invoices.create") ? "Add new" : undefined}
         onCreate={() => setEditing("new")}
-        filters={<FilterSelect value={status} onChange={setStatus} label="All statuses" options={[{ value: "draft", label: "Draft" }, { value: "sent", label: "Sent" }, { value: "cancelled", label: "Cancelled" }]} />}
+        onExport={(format) =>
+          exportTable(format, "invoices", [
+            { key: "number", label: "Invoice" },
+            { key: "client_name", label: "Client" },
+            { key: "booking_reference", label: "Booking" },
+            { key: "total_amount", label: "Total" },
+            { key: "balance", label: "Balance" },
+            { key: "effective_status", label: "Status" },
+          ], allRows as Record<string, unknown>[])}
       />
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Invoice</th><th>Client</th><th>Booking</th><th>Total</th><th>Balance</th><th>Status</th><th className="actions-col">Actions</th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Client</th><th>Balance</th><th>Status</th><th className="actions-col">Actions</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
                 <td><Link to={`/invoices/${row.id}`}>{String(row.number)}</Link></td>
                 <td>{String(row.client_name)}</td>
-                <td>{String(row.booking_reference)}</td>
-                <td>{money(row.total_amount as string, String(row.currency_code))}</td>
                 <td>{money(row.balance as string, String(row.currency_code))}</td>
                 <td><Badge value={String(row.effective_status)} /></td>
                 <td>
                   <RowActions
                     viewTo={`/invoices/${row.id}`}
                     onEdit={can("invoices.edit") ? () => setEditing(row) : undefined}
-                    onDelete={can("invoices.delete") ? () => remove(row.id) : undefined}
+                    onDelete={can("invoices.delete") ? async () => { await remove(row.id) } : undefined}
                     deleteName={String(row.number)}
                   />
                 </td>
               </tr>
             ))}
-            {!loading && rows.length === 0 ? <EmptyRow colSpan={7}>No invoices match.</EmptyRow> : null}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={5}>No invoices match.</EmptyRow> : null}
           </tbody>
         </table>
       </div>
@@ -297,6 +520,7 @@ export function InvoicesPage() {
             setEditing(null)
             load()
           }}
+          successMessage={crudSuccessMessage(editing === "new")}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -304,109 +528,560 @@ export function InvoicesPage() {
   )
 }
 
+type InvoiceRow = Row & { document?: InvoiceDoc }
+
 export function InvoiceDetailPage() {
   const { id } = useParams()
-  const [row, setRow] = useState<Row | null>(null)
-  useEffect(() => { api<Row>(`/api/invoices/${id}/`).then(setRow) }, [id])
-  if (!row) return <p>Loading invoice…</p>
+  const navigate = useNavigate()
+  const toast = useToast()
+  const { can } = useAuth()
+  const [row, setRow] = useState<InvoiceRow | null>(null)
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [form, setForm] = useState({
+    invoice_date: "",
+    due_date: "",
+    payment_terms: "",
+    notes: "",
+    line_title: "",
+    line_description: "",
+    quantity: "1",
+    attention_to: "",
+    contact_person: "",
+  })
+
+  function load() {
+    api<InvoiceRow>(`/api/invoices/${id}/`)
+      .then((data) => {
+        setRow(data)
+        setForm({
+          invoice_date: String(data.invoice_date),
+          due_date: String(data.due_date),
+          payment_terms: String(data.payment_terms || ""),
+          notes: String(data.notes || ""),
+          line_title: String(data.line_title || ""),
+          line_description: String(data.line_description || ""),
+          quantity: String(data.quantity || 1),
+          attention_to: String(data.attention_to || ""),
+          contact_person: String(data.contact_person || ""),
+        })
+      })
+      .catch((err: Error) => setError(err.message))
+  }
+  useEffect(() => { load() }, [id])
+
+  if (!row?.document) return error ? <Banner>{error}</Banner> : <p>Loading invoice…</p>
+  const doc = row.document
+
+  async function save() {
+    setBusy(true)
+    setError("")
+    try {
+      await api(`/api/invoices/${id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          invoice_date: form.invoice_date,
+          due_date: form.due_date,
+          payment_terms: form.payment_terms,
+          notes: form.notes,
+          line_title: form.line_title,
+          line_description: form.line_description,
+          quantity: Number(form.quantity) || 1,
+          attention_to: form.attention_to,
+          contact_person: form.contact_person,
+        }),
+      })
+      toast.success("Invoice updated successfully")
+      navigate("/invoices")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <article className="sheet">
-      <header>
-        <div>
-          <DocumentCompanyLine />
-          <h2>Invoice {String(row.number)}</h2>
-        </div>
-        <button className="no-print" type="button" onClick={() => window.print()}>Print</button>
-      </header>
-      <p>{String(row.client_name)} · booking {String(row.booking_reference)}</p>
-      <p>Date {String(row.invoice_date)} · due {String(row.due_date)}</p>
-      <p>Total {money(row.total_amount as string, String(row.currency_code))}</p>
-      <p>Paid {money(row.amount_paid as string, String(row.currency_code))} · balance {money(row.balance as string, String(row.currency_code))}</p>
-      <p><Badge value={String(row.effective_status)} /></p>
-      <p>{String(row.payment_terms || "")}</p>
-    </article>
+    <div className="page-document">
+      <ScreenToolbar
+        backTo="/invoices"
+        backLabel="Invoices"
+        onPrint={() => window.print()}
+        onExport={(format) => exportInvoiceDocument(format, doc as unknown as Record<string, unknown>, doc.number)}
+      />
+      <Banner>{error}</Banner>
+      <InvoiceDocument doc={doc} />
+      {can("invoices.edit") ? (
+        <form
+          className="card invoice-edit no-print"
+          onSubmit={(event) => {
+            event.preventDefault()
+            save()
+          }}
+        >
+          <h2>Edit invoice details</h2>
+          <p className="muted lede">These fields update what appears on the invoice and match what you entered when creating it.</p>
+          <div className="form-grid">
+            <Field label="Invoice date"><input type="date" value={form.invoice_date} onChange={(e) => setForm({ ...form, invoice_date: e.target.value })} required /></Field>
+            <Field label="Due date"><input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} required /></Field>
+            <Field label="Attention to"><input value={form.attention_to} onChange={(e) => setForm({ ...form, attention_to: e.target.value })} /></Field>
+            <Field label="Contact person"><input value={form.contact_person} onChange={(e) => setForm({ ...form, contact_person: e.target.value })} /></Field>
+            <Field label="Line title" wide><input value={form.line_title} onChange={(e) => setForm({ ...form, line_title: e.target.value })} /></Field>
+            <Field label="Quantity"><input type="number" min={1} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></Field>
+            <Field label="Line description" wide><textarea value={form.line_description} onChange={(e) => setForm({ ...form, line_description: e.target.value })} /></Field>
+            <Field label="Payment terms" wide><textarea value={form.payment_terms} onChange={(e) => setForm({ ...form, payment_terms: e.target.value })} /></Field>
+            <Field label="Notes" wide><textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
+          </div>
+          <div className="form-footer">
+            <button className="primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+            <Link className="button ghost" to="/invoices">Cancel</Link>
+          </div>
+        </form>
+      ) : null}
+    </div>
   )
 }
 
 /* ---------------------------------------------------------------- payments */
 
+const CLIENT_PAY_LABELS: Record<string, string> = {
+  not_paid: "Not paid",
+  partial_paid: "Partial paid",
+  fully_paid: "Fully paid",
+}
+
+function ClientPaymentModal({
+  payment,
+  invoiceRows,
+  invoiceChoices,
+  methods,
+  loadingInvoices,
+  onClose,
+  onSaved,
+}: {
+  payment?: Row | null
+  invoiceRows: Row[]
+  invoiceChoices: Choice[]
+  methods: Choice[]
+  loadingInvoices: boolean
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const toast = useToast()
+  const editing = Boolean(payment)
+  const [invoiceId, setInvoiceId] = useState(payment ? String(payment.invoice) : "")
+  const [paidOn, setPaidOn] = useState(payment ? String(payment.paid_on) : new Date().toISOString().slice(0, 10))
+  const [amount, setAmount] = useState(payment ? String(payment.amount) : "")
+  const [method, setMethod] = useState(payment?.payment_method ? String(payment.payment_method) : "")
+  const [reference, setReference] = useState(payment ? String(payment.reference || "") : "")
+  const [notes, setNotes] = useState(payment ? String(payment.notes || "") : "")
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+  const picked = invoiceRows.find((row) => String(row.id) === invoiceId)
+  const currencyCode = editing
+    ? String(payment?.currency_code || "")
+    : picked ? String(picked.currency_code) : ""
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setError("")
+    setBusy(true)
+    try {
+      const body = {
+        paid_on: paidOn,
+        amount,
+        payment_method: emptyToNull(method),
+        reference,
+        notes,
+      }
+      if (editing && payment) {
+        await api(`/api/payments/${payment.id}/`, { method: "PATCH", body: JSON.stringify(body) })
+        toast.success("Payment updated successfully")
+      } else {
+        await api("/api/payments/", {
+          method: "POST",
+          body: JSON.stringify({ ...body, invoice: Number(invoiceId) }),
+        })
+        toast.success("Payment recorded successfully")
+      }
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : editing ? "Could not update the payment" : "Could not record the payment")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={editing ? "Edit client payment" : "Record client payment"} onClose={onClose}>
+      <form onSubmit={submit} className="form-grid">
+        <Banner>{error}</Banner>
+        <p className="wide muted">
+          Payment is recorded in the invoice currency. Client payment status (not paid / partial paid / fully paid) updates on the booking automatically.
+        </p>
+        {editing ? (
+          <Field label="Invoice" wide>
+            <div className="readonly-field">
+              {String(payment?.invoice_number)} · {String(payment?.client_name)} · booking {String(payment?.booking_reference)}
+            </div>
+          </Field>
+        ) : (
+          <Field label="Invoice" wide>
+            <select className="select-full" value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} required>
+              <option value="">{loadingInvoices ? "Loading invoices…" : invoiceChoices.length ? "Choose invoice" : "No invoices with balance"}</option>
+              {invoiceChoices.map((option) => (
+                <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {!editing && picked ? (
+          <div className="wide readonly-field">
+            <strong>Client payment status now:</strong>{" "}
+            <Badge value={String(picked.client_payment_status)} label={CLIENT_PAY_LABELS[String(picked.client_payment_status)] || String(picked.client_payment_status)} />
+            {" · "}
+            Outstanding {money(picked.balance as string, String(picked.currency_code))}
+          </div>
+        ) : null}
+        <Field label="Payment date"><input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} required /></Field>
+        <Field label={currencyCode ? `Amount paid (${currencyCode})` : "Amount paid"}>
+          <input type="number" step="any" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        </Field>
+        <Field label="Payment method">
+          <select value={method} onChange={(e) => setMethod(e.target.value)}>
+            <option value="">Not set</option>
+            {methods.map((option) => <option key={String(option.value)} value={String(option.value)}>{option.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Reference"><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Bank ref, receipt no." /></Field>
+        <Field label="Notes" wide><textarea value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+        <div className="form-footer wide">
+          <button className="primary" type="submit" disabled={busy || (!editing && !invoiceId)}>{busy ? "Saving…" : editing ? "Save changes" : "Record payment"}</button>
+          <button type="button" className="ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export function PaymentsPage() {
   const { can } = useAuth()
-  const [search, setSearch] = useState("")
-  const [currency, setCurrency] = useState("")
-  const { rows, loading, error, load, remove } = useList<Row>("/api/payments/", search, { currency })
-  const [creating, setCreating] = useState(false)
   const currencies = useChoices("/api/currencies/", codeLabel)
-  const methods = useChoices("/api/payment-methods/", nameLabel, creating)
-  const invoices = useChoices("/api/invoices/?page_size=200&status=sent", (row) => `${String(row.number)} · ${String(row.client_name)} · balance ${money(row.balance as string, String(row.currency_code))}`, creating)
+  const paymentFilters = useMemo(
+    () => [
+      { key: "currency", label: "All currencies", options: currencies.choices },
+      monthFilterField("Payment month"),
+    ],
+    [currencies.choices],
+  )
+  const screen = useListScreen<Row>("/api/payments/", { filterFields: paymentFilters, dateKey: "paid_on" })
+  const { rows, loading, error, load, remove } = screen
+  const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState<Row | null>(null)
+  const [viewing, setViewing] = useState<Row | null>(null)
+  const methods = useChoices("/api/payment-methods/", nameLabel, true)
+  const invoiceLoad = useChoices("/api/payments/invoice-options/", invoiceChoiceLabel, true)
+  const invoiceChoices = useMemo(
+    () => invoiceLoad.rows.filter(payableInvoice).map((row) => ({ value: row.id, label: invoiceChoiceLabel(row) })),
+    [invoiceLoad.rows],
+  )
 
   return (
     <>
-      <PageTitle title="Client payments" lede="Full or partial. The currency received can differ from the fee." />
+      <PageTitle title="Client payments" lede="Record what the client paid toward their travel invoice. Status on the booking becomes not paid, partial paid, or fully paid." />
       <Banner>{error}</Banner>
+      <Banner>{invoiceLoad.loadError}</Banner>
+      {creating && !invoiceLoad.loading && invoiceChoices.length === 0 && !invoiceLoad.loadError ? (
+        <p className="note">No invoices with an outstanding balance yet. Create an invoice from a booking itinerary first.</p>
+      ) : null}
       <ListToolbar
-        search={search}
-        onSearch={setSearch}
-        placeholder="Search client, booking or reference"
-        createLabel={can("payments.create") ? "Record payment" : undefined}
+        page={screen.page}
+        pageSize={screen.pageSize}
+        total={screen.total}
+        onPageChange={screen.setPage}
+        filterFields={paymentFilters}
+        filterValues={screen.filters}
+        onFilterChange={screen.setFilter}
+        createLabel={can("payments.create") ? "Add new" : undefined}
         onCreate={() => setCreating(true)}
-        filters={<FilterSelect value={currency} onChange={setCurrency} label="All currencies" options={currencies.choices} />}
       />
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Date</th><th>Client</th><th>Booking</th><th>Received</th><th>Applied to fee</th><th className="actions-col">Actions</th></tr></thead>
+          <thead><tr><th>Date</th><th>Client</th><th>Amount</th><th className="actions-col">Actions</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
                 <td>{String(row.paid_on)}</td>
                 <td>{String(row.client_name)}</td>
-                <td>{String(row.booking_reference)}</td>
                 <td>{money(row.amount as string, String(row.currency_code))}</td>
-                <td>{String(row.amount_applied)}</td>
                 <td>
                   <RowActions
-                    viewTo={`/bookings/${row.booking}`}
-                    onDelete={can("payments.delete") ? () => remove(row.id) : undefined}
+                    onView={() => setViewing(row)}
+                    onEdit={can("payments.edit") ? () => setEditing(row) : undefined}
+                    onDelete={can("payments.delete") ? async () => { await remove(row.id) } : undefined}
                     deleteName={`the ${money(row.amount as string, String(row.currency_code))} payment from ${String(row.client_name)}`}
                   />
                 </td>
               </tr>
             ))}
-            {!loading && rows.length === 0 ? <EmptyRow colSpan={6}>No payments match.</EmptyRow> : null}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={4}>No payments match.</EmptyRow> : null}
           </tbody>
         </table>
       </div>
-      {creating ? (
-        <RecordForm
-          title="Record payment"
-          initial={{ paid_on: new Date().toISOString().slice(0, 10) }}
-          note="Only sent invoices can receive payments."
-          fields={[
-            { name: "invoice", label: "Invoice", type: "select", required: true, options: invoices.choices, wide: true },
-            { name: "paid_on", label: "Date", type: "date", required: true },
-            { name: "amount", label: "Amount received", type: "number", required: true },
-            { name: "currency", label: "Currency received", type: "select", required: true, options: currencies.choices },
-            { name: "amount_applied", label: "Applied to the fee", type: "number", placeholder: "Only if the currency differs" },
-            { name: "payment_method", label: "Method", type: "select", options: methods.choices },
-            { name: "reference", label: "Reference" },
+      {viewing ? (
+        <DetailModal
+          title="Client payment"
+          items={[
+            ["Date", String(viewing.paid_on)],
+            ["Client", String(viewing.client_name)],
+            ["Booking", <Link to={`/bookings/${viewing.booking}`}>{String(viewing.booking_reference)}</Link>],
+            ["Invoice", String(viewing.invoice_number || viewing.invoice)],
+            ["Amount", money(viewing.amount as string, String(viewing.currency_code))],
+            ["Method", String(viewing.method_name || "—")],
+            ["Reference", String(viewing.reference || "—")],
+            ["Notes", String(viewing.notes || "—")],
           ]}
-          onSubmit={async (values) => {
-            await api("/api/payments/", {
-              method: "POST",
-              body: JSON.stringify({
-                invoice: Number(values.invoice),
-                paid_on: values.paid_on,
-                amount: values.amount,
-                currency: Number(values.currency),
-                amount_applied: emptyToNull(values.amount_applied) ?? undefined,
-                payment_method: emptyToNull(values.payment_method),
-                reference: values.reference,
-              }),
-            })
-            setCreating(false)
-            load()
-          }}
+          onClose={() => setViewing(null)}
+          onEdit={can("payments.edit") ? () => { setEditing(viewing); setViewing(null) } : undefined}
+        />
+      ) : null}
+      {creating ? (
+        <ClientPaymentModal
+          invoiceRows={invoiceLoad.rows}
+          invoiceChoices={invoiceChoices}
+          methods={methods.choices}
+          loadingInvoices={invoiceLoad.loading}
           onClose={() => setCreating(false)}
+          onSaved={() => { setCreating(false); load() }}
+        />
+      ) : null}
+      {editing ? (
+        <ClientPaymentModal
+          payment={editing}
+          invoiceRows={invoiceLoad.rows}
+          invoiceChoices={invoiceChoices}
+          methods={methods.choices}
+          loadingInvoices={invoiceLoad.loading}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load() }}
+        />
+      ) : null}
+    </>
+  )
+}
+
+/* ----------------------------------------------------------- hotel payments */
+
+const VENDOR_PAY_LABELS: Record<string, string> = {
+  not_paid: "Not paid",
+  partial_paid: "Partial paid",
+  fully_paid: "Fully paid",
+}
+
+function HotelPaymentModal({
+  vendors,
+  stayRows,
+  methods,
+  loadingVendors,
+  loadingStays,
+  vendorLoadError,
+  stayLoadError,
+  onClose,
+  onSaved,
+}: {
+  vendors: Choice[]
+  stayRows: Row[]
+  methods: Choice[]
+  loadingVendors: boolean
+  loadingStays: boolean
+  vendorLoadError: string
+  stayLoadError: string
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const toast = useToast()
+  const [vendorId, setVendorId] = useState("")
+  const [stayId, setStayId] = useState("")
+  const [paidOn, setPaidOn] = useState(new Date().toISOString().slice(0, 10))
+  const [amount, setAmount] = useState("")
+  const [method, setMethod] = useState("")
+  const [reference, setReference] = useState("")
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+
+  const staysForVendor = useMemo(
+    () => (vendorId ? stayRows.filter((row) => String(row.vendor) === vendorId) : stayRows),
+    [stayRows, vendorId],
+  )
+  const picked = stayRows.find((row) => String(row.id) === stayId)
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setError("")
+    setBusy(true)
+    try {
+      await api("/api/vendor-payments/", {
+        method: "POST",
+        body: JSON.stringify({
+          accommodation: Number(stayId),
+          paid_on: paidOn,
+          amount,
+          payment_method: emptyToNull(method),
+          reference,
+        }),
+      })
+      toast.success("Hotel payment recorded successfully")
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not record the hotel payment")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Pay accommodation vendor" onClose={onClose}>
+      <form onSubmit={submit} className="form-grid">
+        <Banner>{error}</Banner>
+        <Banner>{vendorLoadError}</Banner>
+        <Banner>{stayLoadError}</Banner>
+        <p className="wide muted">
+          Choose the hotel/lodge, then which booking dates to pay for. Vendor payment status on the booking updates automatically (not paid / partial paid / fully paid).
+        </p>
+        <Field label="Hotel / lodge" wide>
+          <select
+            className="select-full"
+            value={vendorId}
+            onChange={(e) => { setVendorId(e.target.value); setStayId("") }}
+            required
+          >
+            <option value="">{loadingVendors ? "Loading…" : vendors.length ? "Choose vendor" : "No vendors — add under Operations → Vendors"}</option>
+            {vendors.map((option) => (
+              <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Booking stay (dates)" wide>
+          <select className="select-full" value={stayId} onChange={(e) => setStayId(e.target.value)} required disabled={!vendorId && staysForVendor.length === 0}>
+            <option value="">
+              {loadingStays ? "Loading…" : !vendorId ? "Choose the lodge first" : staysForVendor.length ? "Choose booking dates" : "No bookings use this lodge yet — add it on a booking file"}
+            </option>
+            {staysForVendor.map((row) => (
+              <option key={String(row.id)} value={String(row.id)}>
+                {stayChoiceLabel(row)} · owed {money(row.amount_owed as string, String(row.cost_currency_code || ""))}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {picked ? (
+          <div className="wide readonly-field">
+            <strong>Vendor payment status on this stay:</strong>{" "}
+            <Badge value={String(picked.vendor_payment_status)} label={VENDOR_PAY_LABELS[String(picked.vendor_payment_status)] || String(picked.vendor_payment_status)} />
+            {" · "}
+            Agreed cost {money(picked.agreed_cost as string, String(picked.cost_currency_code || ""))}
+          </div>
+        ) : null}
+        <Field label="Payment date"><input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} required /></Field>
+        <Field label={picked ? `Amount paid (${String(picked.cost_currency_code || "")})` : "Amount paid"}>
+          <input type="number" step="any" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        </Field>
+        <Field label="Payment method">
+          <select value={method} onChange={(e) => setMethod(e.target.value)}>
+            <option value="">Not set</option>
+            {methods.map((option) => <option key={String(option.value)} value={String(option.value)}>{option.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Reference"><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Bank ref, receipt no." /></Field>
+        <div className="form-footer wide">
+          <button className="primary" type="submit" disabled={busy || !stayId}>{busy ? "Saving…" : "Record hotel payment"}</button>
+          <button type="button" className="ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+export function HotelPaymentsPage() {
+  const { can } = useAuth()
+  const screen = useListScreen<Row>("/api/vendor-payments/", {
+    filterFields: [monthFilterField("Payment month")],
+    dateKey: "paid_on",
+  })
+  const { rows, loading, error, load, remove } = screen
+  const [creating, setCreating] = useState(false)
+  const [viewing, setViewing] = useState<Row | null>(null)
+  const vendors = useChoices("/api/vendors/?for_stays=1&status=active", nameLabel, true)
+  const methods = useChoices("/api/payment-methods/", nameLabel, true)
+  const stays = useChoices("/api/vendor-payments/stay-options/", stayChoiceLabel, true)
+
+  return (
+    <>
+      <PageTitle title="Hotel payments" lede="Pay hotels and lodges for client stays on bookings." />
+      <Banner>{error}</Banner>
+      <Banner>{vendors.loadError}</Banner>
+      <Banner>{stays.loadError}</Banner>
+      {creating && !vendors.loading && vendors.choices.length === 0 && !vendors.loadError ? (
+        <p className="note">No vendors yet. Add them under Operations → Vendors, then assign stays on a booking.</p>
+      ) : null}
+      <ListToolbar
+        page={screen.page}
+        pageSize={screen.pageSize}
+        total={screen.total}
+        onPageChange={screen.setPage}
+        filterFields={[monthFilterField("Payment month")]}
+        filterValues={screen.filters}
+        onFilterChange={screen.setFilter}
+        createLabel={can("costs.create") ? "Add new" : undefined}
+        onCreate={() => setCreating(true)}
+      />
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Hotel / lodge</th><th>Amount</th><th className="actions-col">Actions</th></tr></thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td>{String(row.paid_on)}</td>
+                <td>{String(row.vendor_name || row.property_name)}</td>
+                <td>{money(row.amount as string, String(row.currency_code))}</td>
+                <td>
+                  <RowActions
+                    onView={() => setViewing(row)}
+                    onDelete={can("costs.delete") ? async () => { await remove(row.id) } : undefined}
+                    deleteName={`payment to ${String(row.property_name)}`}
+                  />
+                </td>
+              </tr>
+            ))}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={4}>No hotel payments match.</EmptyRow> : null}
+          </tbody>
+        </table>
+      </div>
+      {viewing ? (
+        <DetailModal
+          title="Hotel payment"
+          items={[
+            ["Date", String(viewing.paid_on)],
+            ["Booking", <Link to={`/bookings/${viewing.booking}`}>{String(viewing.booking_reference)}</Link>],
+            ["Hotel / lodge", String(viewing.vendor_name || viewing.property_name)],
+            ["Property", String(viewing.property_name || "—")],
+            ["Amount", money(viewing.amount as string, String(viewing.currency_code))],
+            ["Method", String(viewing.method_name || "—")],
+            ["Reference", String(viewing.reference || "—")],
+            ["Notes", String(viewing.notes || "—")],
+          ]}
+          onClose={() => setViewing(null)}
+        />
+      ) : null}
+      {creating ? (
+        <HotelPaymentModal
+          vendors={vendors.choices}
+          stayRows={stays.rows}
+          methods={methods.choices}
+          loadingVendors={vendors.loading}
+          loadingStays={stays.loading}
+          vendorLoadError={vendors.loadError}
+          stayLoadError={stays.loadError}
+          onClose={() => setCreating(false)}
+          onSaved={() => { setCreating(false); load() }}
         />
       ) : null}
     </>
@@ -417,12 +1092,18 @@ export function PaymentsPage() {
 
 export function ExpensesPage() {
   const { can } = useAuth()
-  const [search, setSearch] = useState("")
-  const [category, setCategory] = useState("")
-  const { rows, loading, error, load, remove } = useList<Row>("/api/expenses/", search, { category })
+  const categories = useChoices("/api/expense-categories/", nameLabel)
+  const expenseFilters = useMemo(
+    () => [
+      { key: "category", label: "All categories", options: categories.choices },
+      monthFilterField("Expense month"),
+    ],
+    [categories.choices],
+  )
+  const screen = useListScreen<Row>("/api/expenses/", { filterFields: expenseFilters, dateKey: "spent_on" })
+  const { rows, loading, error, load, remove } = screen
   const [editing, setEditing] = useState<Row | "new" | null>(null)
   const [viewing, setViewing] = useState<Row | null>(null)
-  const categories = useChoices("/api/expense-categories/", nameLabel)
   const currencies = useChoices("/api/currencies/", codeLabel, editing !== null)
   const bookings = useChoices("/api/bookings/?page_size=200", (row) => String(row.reference), editing !== null)
 
@@ -431,34 +1112,36 @@ export function ExpensesPage() {
       <PageTitle title="Expenses" lede="Costs the company covers besides the hotel payments recorded on a stay." />
       <Banner>{error}</Banner>
       <ListToolbar
-        search={search}
-        onSearch={setSearch}
-        placeholder="Search description or booking"
-        createLabel={can("expenses.create") ? "Record expense" : undefined}
+        page={screen.page}
+        pageSize={screen.pageSize}
+        total={screen.total}
+        onPageChange={screen.setPage}
+        filterFields={expenseFilters}
+        filterValues={screen.filters}
+        onFilterChange={screen.setFilter}
+        createLabel={can("expenses.create") ? "Add new" : undefined}
         onCreate={() => setEditing("new")}
-        filters={<FilterSelect value={category} onChange={setCategory} label="All categories" options={categories.choices} />}
       />
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Date</th><th>Description</th><th>Booking</th><th>Amount</th><th className="actions-col">Actions</th></tr></thead>
+          <thead><tr><th>Date</th><th>Expense</th><th>Amount</th><th className="actions-col">Actions</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
                 <td>{String(row.spent_on)}</td>
-                <td>{String(row.description || row.category_name || "Expense")}<div className="muted">{String(row.category_name || "")}</div></td>
-                <td>{String(row.booking_reference || "—")}</td>
+                <td>{String(row.description || row.category_name || "Expense")}</td>
                 <td>{money(row.amount as string, String(row.currency_code))}</td>
                 <td>
                   <RowActions
                     onView={() => setViewing(row)}
                     onEdit={can("expenses.edit") ? () => setEditing(row) : undefined}
-                    onDelete={can("expenses.delete") ? () => remove(row.id) : undefined}
+                    onDelete={can("expenses.delete") ? async () => { await remove(row.id) } : undefined}
                     deleteName={String(row.description || "this expense")}
                   />
                 </td>
               </tr>
             ))}
-            {!loading && rows.length === 0 ? <EmptyRow colSpan={5}>No expenses match.</EmptyRow> : null}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={4}>No expenses match.</EmptyRow> : null}
           </tbody>
         </table>
       </div>
@@ -468,9 +1151,10 @@ export function ExpensesPage() {
           items={[
             ["Date", String(viewing.spent_on)],
             ["Amount", money(viewing.amount as string, String(viewing.currency_code))],
-            ["Category", String(viewing.category_name || "")],
-            ["Booking", String(viewing.booking_reference || "")],
-            ["Description", String(viewing.description || "")],
+            ["Category", String(viewing.category_name || "—")],
+            ["Booking", viewing.booking_reference ? <Link to={`/bookings/${viewing.booking}`}>{String(viewing.booking_reference)}</Link> : "—"],
+            ["Payment method", String(viewing.method_name || "—")],
+            ["Description", String(viewing.description || "—")],
           ]}
           onClose={() => setViewing(null)}
           onEdit={can("expenses.edit") ? () => { setEditing(viewing); setViewing(null) } : undefined}
@@ -505,6 +1189,7 @@ export function ExpensesPage() {
             setEditing(null)
             load()
           }}
+          successMessage={crudSuccessMessage(editing === "new")}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -519,7 +1204,6 @@ export function CashbookPage() {
   const [methods, setMethods] = useState<Row[]>([])
   const [currency, setCurrency] = useState("")
   const [method, setMethod] = useState("")
-  const [search, setSearch] = useState("")
   const [data, setData] = useState<{ balances: Record<string, string>; books: Record<string, Row[]> } | null>(null)
   useEffect(() => {
     apiList<Row>("/api/currencies/").then(setCurrencies)
@@ -533,27 +1217,42 @@ export function CashbookPage() {
   }, [currency, method])
   const code = currency || Object.keys(data?.books || {})[0] || ""
   const allRows = code && data ? data.books[code] || [] : []
-  const rows = search ? allRows.filter((row) => `${String(row.description)} ${String(row.booking || "")}`.toLowerCase().includes(search.toLowerCase())) : allRows
+  const cashbookFilters = useMemo(
+    () => [
+      { key: "currency", label: "All currencies", options: currencies.map((item) => ({ value: String(item.code), label: String(item.code) })) },
+      { key: "method", label: "All methods", options: methods.map((item) => ({ value: item.id, label: String(item.name) })) },
+      monthFilterField("Movement month"),
+    ],
+    [currencies, methods],
+  )
+  const [month, setMonth] = useState("")
+  const filteredRows = useMemo(
+    () => allRows.filter((row) => !month || String(row.date).startsWith(month)),
+    [allRows, month],
+  )
+  const pag = useClientPagination(filteredRows)
   return (
     <>
       <PageTitle title="Cashbook" lede="TSH and USD each keep their own running balance. Filter by the way the money moved." />
       <ListToolbar
-        search={search}
-        onSearch={setSearch}
-        placeholder="Search description or booking"
-        filters={
-          <>
-            <FilterSelect value={currency} onChange={setCurrency} label="All currencies" options={currencies.map((item) => ({ value: String(item.code), label: String(item.code) }))} />
-            <FilterSelect value={method} onChange={setMethod} label="All methods" options={methods.map((item) => ({ value: item.id, label: String(item.name) }))} />
-          </>
-        }
+        page={pag.page}
+        pageSize={pag.pageSize}
+        total={pag.total}
+        onPageChange={pag.setPage}
+        filterFields={cashbookFilters}
+        filterValues={{ currency, method, month }}
+        onFilterChange={(key, value) => {
+          if (key === "currency") setCurrency(value)
+          else if (key === "method") setMethod(value)
+          else if (key === "month") setMonth(value)
+        }}
       />
       {data ? <p>Balances: {Object.entries(data.balances).map(([key, value]) => money(value, key)).join(" · ") || "No movement yet"}</p> : null}
       <div className="table-wrap">
         <table>
           <thead><tr><th>Date</th><th>Description</th><th>In</th><th>Out</th><th>Balance</th></tr></thead>
           <tbody>
-            {rows.map((row, index) => (
+            {pag.rows.map((row, index) => (
               <tr key={`${row.kind}-${row.id}-${index}`}>
                 <td>{String(row.date)}</td>
                 <td>{String(row.description)}<div className="muted">{String(row.booking || "")}</div></td>
@@ -571,28 +1270,22 @@ export function CashbookPage() {
 
 export function ProfitPage() {
   const [all, setAll] = useState<Row[]>([])
-  const [search, setSearch] = useState("")
   useEffect(() => { api<Row[]>("/api/profitability/").then(setAll) }, [])
-  const rows = search ? all.filter((row) => `${String(row.reference)} ${String(row.client)}`.toLowerCase().includes(search.toLowerCase())) : all
+  const pag = useClientPagination(all)
   return (
     <>
       <PageTitle title="Profitability" lede="Fee minus hotel costs and expenses in the same currency." />
-      <ListToolbar search={search} onSearch={setSearch} placeholder="Search booking or client" />
+      <ListToolbar page={pag.page} pageSize={pag.pageSize} total={pag.total} onPageChange={pag.setPage} />
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Booking</th><th>Client</th><th>Fee</th><th>Gross profit</th><th>Other currency costs</th><th className="actions-col">Actions</th></tr></thead>
+          <thead><tr><th>Booking</th><th>Gross profit</th><th className="actions-col">Actions</th></tr></thead>
           <tbody>
-            {rows.map((row) => {
+            {pag.rows.map((row) => {
               const profit = row.gross_profit as { currency: string; amount: string }
-              const fee = row.fee as { currency: string; amount: string }
-              const other = row.unconverted_costs as { currency: string; amount: string }[]
               return (
                 <tr key={row.id}>
                   <td><Link to={`/bookings/${row.id}`}>{String(row.reference)}</Link></td>
-                  <td>{String(row.client)}</td>
-                  <td>{money(fee.amount, fee.currency)}</td>
                   <td>{money(profit.amount, profit.currency)}</td>
-                  <td>{moneyList(other)}</td>
                   <td><RowActions viewTo={`/bookings/${row.id}`} /></td>
                 </tr>
               )
@@ -608,59 +1301,68 @@ export function ProfitPage() {
 
 export function VendorsPage() {
   const { can } = useAuth()
-  const [search, setSearch] = useState("")
-  const [status, setStatus] = useState("")
-  const { rows, loading, error, load, remove } = useList<Row>("/api/vendors/", search, { status })
+  const screen = useListScreen<Row>("/api/vendors/", {
+    statusKey: "status",
+    statusTabs: VENDOR_STATUS_TABS,
+    filterFields: [monthFilterField()],
+    dateKey: "created_at",
+  })
+  const { rows, loading, error, load, remove } = screen
   const [editing, setEditing] = useState<Row | "new" | null>(null)
   const [viewing, setViewing] = useState<Row | null>(null)
 
   return (
     <>
-      <PageTitle title="Accommodation vendors" lede="Hotels and lodges only — each vendor owns properties you pick on every stay." />
+      <PageTitle title="Vendors" lede="Hotel and lodge suppliers. Add vendors here first; when you build a booking, choose the vendor and their lodge for each client stay." />
       <Banner>{error}</Banner>
       <ListToolbar
-        search={search}
-        onSearch={setSearch}
-        placeholder="Search name, contact or location"
-        createLabel={can("vendors.create") ? "New vendor" : undefined}
+        statusTabs={VENDOR_STATUS_TABS}
+        activeStatusTab={screen.statusTab}
+        onStatusTabChange={screen.setStatusTab}
+        tabCounts={screen.tabCounts}
+        page={screen.page}
+        pageSize={screen.pageSize}
+        total={screen.total}
+        onPageChange={screen.setPage}
+        filterFields={[monthFilterField()]}
+        filterValues={screen.filters}
+        onFilterChange={screen.setFilter}
+        createLabel={can("vendors.create") ? "Add new" : undefined}
         onCreate={() => setEditing("new")}
-        filters={<FilterSelect value={status} onChange={setStatus} label="All statuses" options={[{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]} />}
       />
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Vendor</th><th>Contact</th><th>Properties</th><th>Still owed</th><th className="actions-col">Actions</th></tr></thead>
+          <thead><tr><th>Vendor</th><th>Location</th><th>Status</th><th className="actions-col">Actions</th></tr></thead>
           <tbody>
             {rows.map((vendor) => (
               <tr key={vendor.id}>
-                <td><strong>{String(vendor.name)}</strong><div className="muted">{String(vendor.location || "")}</div></td>
-                <td>{String(vendor.contact_person || "—")}<div className="muted">{String(vendor.phone || "")}</div></td>
-                <td>{((vendor.properties as { name: string }[]) || []).map((item) => item.name).join(", ") || "None yet"}</td>
-                <td>{moneyList(vendor.owed as { currency: string; amount: string }[])}</td>
+                <td><strong>{String(vendor.name)}</strong></td>
+                <td>{String(vendor.location || "—")}</td>
+                <td><Badge value={String(vendor.status || "active")} /></td>
                 <td>
                   <RowActions
                     onView={() => setViewing(vendor)}
                     onEdit={can("vendors.edit") ? () => setEditing(vendor) : undefined}
-                    onDelete={can("vendors.delete") ? () => remove(vendor.id) : undefined}
+                    onDelete={can("vendors.delete") ? async () => { await remove(vendor.id) } : undefined}
                     deleteName={String(vendor.name)}
                   />
                 </td>
               </tr>
             ))}
-            {!loading && rows.length === 0 ? <EmptyRow colSpan={5}>No accommodation vendors match. Add one before you put stays on a booking.</EmptyRow> : null}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={4}>No vendors yet. Add a vendor, then assign their lodge on a booking.</EmptyRow> : null}
           </tbody>
         </table>
       </div>
       {editing ? (
         <RecordForm
-          title={editing === "new" ? "New accommodation vendor" : "Edit vendor"}
+          title={editing === "new" ? "New vendor" : "Edit vendor"}
           initial={editing === "new" ? {} : { name: editing.name as string, contact_person: editing.contact_person as string, phone: editing.phone as string, email: editing.email as string, location: editing.location as string }}
           fields={[
-            { name: "name", label: "Lodging / hotel name", required: true, wide: true },
+            { name: "name", label: "Vendor name", required: true, wide: true },
             { name: "contact_person", label: "Contact" },
             { name: "phone", label: "Phone" },
             { name: "email", label: "Email", type: "email" },
-            { name: "location", label: "Location" },
-            ...(editing === "new" ? [{ name: "first_property", label: "First property", wide: true }] : []),
+            { name: "location", label: "Location / area" },
           ]}
           onSubmit={async (values) => {
             const body: Record<string, unknown> = {
@@ -671,7 +1373,6 @@ export function VendorsPage() {
               location: values.location,
             }
             if (editing === "new") {
-              body.properties = values.first_property ? [{ name: values.first_property, location: values.location }] : []
               await api("/api/vendors/", { method: "POST", body: JSON.stringify(body) })
             } else {
               await api(`/api/vendors/${editing.id}/`, { method: "PATCH", body: JSON.stringify(body) })
@@ -679,19 +1380,22 @@ export function VendorsPage() {
             setEditing(null)
             load()
           }}
+          successMessage={crudSuccessMessage(editing === "new")}
           onClose={() => setEditing(null)}
         />
       ) : null}
       {viewing ? (
         <Modal title={String(viewing.name)} onClose={() => setViewing(null)}>
           <dl className="detail-list">
-            <dt>Contact</dt><dd>{String(viewing.contact_person || "—")}</dd>
+            <dt>Contact person</dt><dd>{String(viewing.contact_person || "—")}</dd>
             <dt>Phone</dt><dd>{String(viewing.phone || "—")}</dd>
             <dt>Email</dt><dd>{String(viewing.email || "—")}</dd>
             <dt>Location</dt><dd>{String(viewing.location || "—")}</dd>
-            <dt>Properties</dt><dd>{((viewing.properties as { name: string }[]) || []).map((item) => item.name).join(", ") || "None yet"}</dd>
-            <dt>Still owed</dt><dd>{moneyList(viewing.owed as { currency: string; amount: string }[])}</dd>
+            <dt>Status</dt><dd>{String(viewing.status || "active")}</dd>
           </dl>
+          <div className="row" style={{ marginTop: 14 }}>
+            <button type="button" className="ghost" onClick={() => setViewing(null)}>Back</button>
+          </div>
         </Modal>
       ) : null}
     </>

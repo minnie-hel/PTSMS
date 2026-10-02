@@ -155,33 +155,17 @@ class BookingFlowTests(APITestCase):
         )
         self.assertEqual(invoice.status_code, 201, invoice.data)
         self.assertEqual(invoice.data["total_amount"], "8000.00")
-        draft_pay = self.client.post(
+        first_pay = self.client.post(
             "/api/payments/",
             {
                 "invoice": invoice.data["id"],
-                "booking": booking["id"],
                 "paid_on": str(date.today()),
                 "amount": "3000.00",
-                "currency": self.usd.id,
                 "payment_method": self.method.id,
             },
             format="json",
         )
-        self.assertEqual(draft_pay.status_code, 400)
-        self.client.post(f"/api/invoices/{invoice.data['id']}/send/")
-        partial = self.client.post(
-            "/api/payments/",
-            {
-                "invoice": invoice.data["id"],
-                "booking": booking["id"],
-                "paid_on": str(date.today()),
-                "amount": "3000.00",
-                "currency": self.usd.id,
-                "payment_method": self.method.id,
-            },
-            format="json",
-        )
-        self.assertEqual(partial.status_code, 201, partial.data)
+        self.assertEqual(first_pay.status_code, 201, first_pay.data)
         refreshed = self.client.get(f"/api/bookings/{booking['id']}/")
         self.assertEqual(refreshed.data["client_payment_status"], "partial_paid")
         self.assertEqual(Decimal(refreshed.data["balance"]), Decimal("5000.00"))
@@ -189,7 +173,6 @@ class BookingFlowTests(APITestCase):
             "/api/payments/",
             {
                 "invoice": invoice.data["id"],
-                "booking": booking["id"],
                 "paid_on": str(date.today()),
                 "amount": "250000.00",
                 "currency": self.tsh.id,
@@ -200,6 +183,15 @@ class BookingFlowTests(APITestCase):
         )
         refreshed = self.client.get(f"/api/bookings/{booking['id']}/")
         self.assertEqual(refreshed.data["client_payment_status"], "fully_paid")
+        payment_id = first_pay.data["id"]
+        patched = self.client.patch(
+            f"/api/payments/{payment_id}/",
+            {"amount": "2500.00"},
+            format="json",
+        )
+        self.assertEqual(patched.status_code, 200, patched.data)
+        refreshed = self.client.get(f"/api/bookings/{booking['id']}/")
+        self.assertEqual(refreshed.data["client_payment_status"], "partial_paid")
         book = cashbook()
         self.assertIn("USD", book["balances"])
         self.assertIn("TSH", book["balances"])

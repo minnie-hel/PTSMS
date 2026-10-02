@@ -11,6 +11,7 @@ import {
   DocumentText,
   Edit2,
   Eye,
+  Filter,
   House2,
   Map1,
   Moon,
@@ -69,6 +70,7 @@ export function IconBed() { return <House2 size={NAV} color="currentColor" /> }
 export function IconShield() { return <ShieldTick size={NAV} color="currentColor" /> }
 
 export function IconSearch() { return <SearchNormal1 size={SMALL} color="currentColor" /> }
+export function IconFilter() { return <Filter size={SMALL} color="currentColor" /> }
 export function IconPlus() { return <Add size={SMALL} color="currentColor" /> }
 export function IconEye() { return <Eye size={SMALL} color="currentColor" /> }
 export function IconEdit() { return <Edit2 size={SMALL} color="currentColor" /> }

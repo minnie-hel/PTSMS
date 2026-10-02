@@ -22,6 +22,11 @@ class Invoice(models.Model):
     total_amount = models.DecimalField(max_digits=14, decimal_places=2)
     payment_terms = models.CharField(max_length=200, blank=True)
     notes = models.TextField(blank=True)
+    line_title = models.CharField(max_length=300, blank=True)
+    line_description = models.TextField(blank=True)
+    quantity = models.PositiveIntegerField(default=1)
+    attention_to = models.CharField(max_length=200, blank=True)
+    contact_person = models.CharField(max_length=200, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="invoices_created"

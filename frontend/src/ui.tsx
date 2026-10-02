@@ -21,18 +21,41 @@ import {
   IconWallet,
 } from "./icons"
 
-export function money(amount: string | number | null | undefined, code?: string) {
+export function formatMoneyAmount(amount: string | number | null | undefined) {
   if (amount === null || amount === undefined || amount === "") return "—"
-  const value = typeof amount === "number" ? amount : Number(amount)
-  const formatted = Number.isFinite(value)
-    ? value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : String(amount)
+  const value = typeof amount === "number" ? amount : Number(String(amount).replace(/,/g, ""))
+  if (!Number.isFinite(value)) return String(amount)
+  return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
+
+export function money(amount: string | number | null | undefined, code?: string) {
+  const formatted = formatMoneyAmount(amount)
+  if (formatted === "—") return formatted
   return code ? `${code} ${formatted}` : formatted
 }
 
 export function moneyList(rows?: { currency: string; amount: string | number }[] | null) {
   if (!rows?.length) return "—"
   return rows.map((row) => money(row.amount, row.currency)).join(" · ")
+}
+
+/** Stacked currency lines for dashboard cards (readable amounts, no long single-line strings). */
+export function MoneyCardAmounts({ rows }: { rows?: { currency: string; amount: string | number }[] | null }) {
+  const items = (rows ?? []).filter((row) => {
+    const value = Number(row.amount)
+    return Number.isFinite(value) && Math.abs(value) >= 0.005
+  })
+  if (!items.length) return <>—</>
+  return (
+    <span className="money-card-amounts">
+      {items.map((row) => (
+        <span className="money-card-line" key={row.currency}>
+          <span className="money-card-code">{row.currency}</span>
+          <span className="money-card-num">{formatMoneyAmount(row.amount)}</span>
+        </span>
+      ))}
+    </span>
+  )
 }
 
 const TONES: Record<string, string> = {
@@ -61,10 +84,27 @@ export function Badge({ value, label }: { value?: string; label?: string }) {
   return <span className={`badge ${TONES[value || ""] || ""}`}>{label || value || "—"}</span>
 }
 
-export function PageTitle({ title, lede, children }: { title: string; lede?: string; children?: ReactNode }) {
+export function BackLink({ to, label = "Back to list" }: { to: string; label?: string }) {
+  return <Link className="back-link no-print" to={to}>← {label}</Link>
+}
+
+export function PageTitle({
+  title,
+  lede,
+  children,
+  backTo,
+  backLabel,
+}: {
+  title: string
+  lede?: string
+  children?: ReactNode
+  backTo?: string
+  backLabel?: string
+}) {
   return (
     <div className="page-head">
       <div>
+        {backTo ? <BackLink to={backTo} label={backLabel} /> : null}
         <h1>{title}</h1>
         {lede ? <p className="lede">{lede}</p> : null}
       </div>
@@ -99,10 +139,7 @@ export function Modal({ title, children, onClose, wide }: { title: string; child
   return (
     <div className="modal-back" onClick={onClose}>
       <div className={`modal ${wide ? "wide" : ""}`} onClick={(event) => event.stopPropagation()}>
-        <div className="page-head">
-          <h2 style={{ fontFamily: "Fraunces, Palatino, Georgia, serif", margin: 0 }}>{title}</h2>
-          <button className="ghost" onClick={onClose} type="button">Close</button>
-        </div>
+        <h2 className="modal-title">{title}</h2>
         {children}
       </div>
     </div>
@@ -154,7 +191,12 @@ const NAV_GROUPS: NavGroup[] = [
     id: "bookings",
     label: "Bookings",
     icon: <IconCalendar />,
-    children: [{ to: "/bookings", label: "All bookings", code: "bookings.view" }],
+    children: [
+      { to: "/bookings", label: "All bookings", code: "bookings.view", end: true },
+      { to: "/bookings/upcoming", label: "Upcoming", code: "bookings.view" },
+      { to: "/bookings/in-progress", label: "In progress", code: "bookings.view" },
+      { to: "/bookings/completed", label: "Completed", code: "bookings.view" },
+    ],
   },
   {
     id: "operations",
@@ -162,7 +204,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: <IconCompass />,
     children: [
       { to: "/operations", label: "Safari operations", code: "operations.view" },
-      { to: "/vendors", label: "Accommodation vendors", code: "vendors.view" },
+      { to: "/vendors", label: "Vendors", code: "vendors.view" },
     ],
   },
   {
@@ -171,7 +213,8 @@ const NAV_GROUPS: NavGroup[] = [
     icon: <IconWallet />,
     children: [
       { to: "/invoices", label: "Invoices", code: "invoices.view" },
-      { to: "/payments", label: "Payments", code: "payments.view" },
+      { to: "/payments", label: "Client payments", code: "payments.view" },
+      { to: "/hotel-payments", label: "Hotel payments", code: "costs.view" },
       { to: "/expenses", label: "Expenses", code: "expenses.view" },
       { to: "/cashbook", label: "Cashbook", code: "cashbook.view" },
       { to: "/profit", label: "Profitability", code: "profitability.view" },
@@ -309,8 +352,18 @@ function TopBar({ collapsed, onToggleSide }: { collapsed: boolean; onToggleSide:
   )
 }
 
+const BOOKING_SUBMODULES = new Set(["upcoming", "in-progress", "completed", "new"])
+
 function isChildActive(child: NavLinkItem, pathname: string) {
-  return child.end ? pathname === child.to : pathname === child.to || pathname.startsWith(`${child.to}/`)
+  if (child.end) {
+    if (pathname === child.to) return true
+    if (child.to === "/bookings") {
+      const segment = pathname.split("/")[2]
+      if (segment && !BOOKING_SUBMODULES.has(segment)) return true
+    }
+    return false
+  }
+  return pathname === child.to || pathname.startsWith(`${child.to}/`)
 }
 
 function visibleChildren(group: NavGroup, can: (code: string) => boolean) {
@@ -432,7 +485,7 @@ export function Shell() {
       </aside>
       <div className="main">
         <TopBar collapsed={collapsed} onToggleSide={() => setCollapsed((value) => !value)} />
-        <div className="page">
+        <div className="page page-main">
           <Outlet />
         </div>
       </div>

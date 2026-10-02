@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { Navigate } from "react-router-dom"
 import { useAuth } from "../auth"
-import { CompanyMark, useCompany } from "../company"
+import { CompanyMark, DEFAULT_BRAND_NAME, useCompany } from "../company"
 import { Banner, Field } from "../ui"
 
 export function LoginPage() {
@@ -31,10 +31,10 @@ export function LoginPage() {
       <div className="login-panel">
         <div className="login-card">
           <header className="login-brand">
-            <div className="login-logo-slot" aria-hidden={brandingLoading}>
+            <div className="login-logo-slot" aria-busy={brandingLoading}>
               <CompanyMark large />
             </div>
-            {company.welcome_title ? <h1>{company.welcome_title}</h1> : null}
+            <h1>{company.welcome_title || `Welcome to ${company.name || DEFAULT_BRAND_NAME}`}</h1>
           </header>
           <form className="login-form" onSubmit={submit}>
             <Banner>{error}</Banner>

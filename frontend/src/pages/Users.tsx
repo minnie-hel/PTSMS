@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { api, apiList } from "../api"
 import { useAuth } from "../auth"
 import { Badge, Banner, Field, Modal, PageTitle } from "../ui"
-import { EmptyRow, FilterSelect, ListToolbar, RecordForm, RowActions, useList } from "../lists"
+import { EmptyRow, ListToolbar, RecordForm, RowActions, useClientPagination, useList, useListScreen } from "../lists"
+import { USER_STATUS_TABS } from "../listTabs"
+import { crudSuccessMessage, useToast } from "../toast"
 
 type Role = {
   id: number
@@ -24,10 +26,6 @@ type Person = {
 
 export function UsersPage() {
   const { can, user: me } = useAuth()
-  const [search, setSearch] = useState("")
-  const [role, setRole] = useState("")
-  const [status, setStatus] = useState("")
-  const { rows, loading, error, load, remove } = useList<Person>("/api/users/", search, { role, is_active: status })
   const [roles, setRoles] = useState<Role[]>([])
   const [editing, setEditing] = useState<Person | "new" | null>(null)
   const [viewing, setViewing] = useState<Person | null>(null)
@@ -36,7 +34,14 @@ export function UsersPage() {
     apiList<Role>("/api/roles/").then(setRoles).catch(() => setRoles([]))
   }, [])
 
-  const roleOptions = roles.map((item) => ({ value: item.id, label: item.name }))
+  const roleOptions = roles.map((item) => ({ value: String(item.id), label: item.name }))
+  const userFilters = [{ key: "role", label: "All roles", options: roleOptions }]
+  const screen = useListScreen<Person>("/api/users/", {
+    statusKey: "is_active",
+    statusTabs: USER_STATUS_TABS,
+    filterFields: userFilters,
+  })
+  const { rows, loading, error, load, remove } = screen
 
   async function save(values: Record<string, string>) {
     const body: Record<string, unknown> = {
@@ -58,47 +63,42 @@ export function UsersPage() {
       <PageTitle title="Users" lede="Staff accounts. Each person gets one role that decides what they can see and do." />
       <Banner>{error}</Banner>
       <ListToolbar
-        search={search}
-        onSearch={setSearch}
-        placeholder="Search name, email or phone"
-        createLabel={can("users.create") ? "New user" : undefined}
+        statusTabs={USER_STATUS_TABS}
+        activeStatusTab={screen.statusTab}
+        onStatusTabChange={screen.setStatusTab}
+        tabCounts={screen.tabCounts}
+        page={screen.page}
+        pageSize={screen.pageSize}
+        total={screen.total}
+        onPageChange={screen.setPage}
+        filterFields={userFilters}
+        filterValues={screen.filters}
+        onFilterChange={screen.setFilter}
+        createLabel={can("users.create") ? "Add new" : undefined}
         onCreate={() => setEditing("new")}
-        filters={
-          <>
-            <FilterSelect value={role} onChange={setRole} label="All roles" options={roleOptions} />
-            <FilterSelect
-              value={status}
-              onChange={setStatus}
-              label="Any status"
-              options={[{ value: "true", label: "Active" }, { value: "false", label: "Inactive" }]}
-            />
-          </>
-        }
       />
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Status</th><th className="actions-col">Actions</th></tr>
+            <tr><th>Staff</th><th>Role</th><th>Status</th><th className="actions-col">Actions</th></tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
-                <td><strong>{row.full_name}</strong>{row.is_superadmin ? <div className="muted">Super Admin</div> : null}</td>
-                <td>{row.email}</td>
-                <td>{row.phone || "—"}</td>
+                <td><strong>{row.full_name}</strong></td>
                 <td>{row.role_name || (row.is_superadmin ? "All access" : "No role")}</td>
                 <td><Badge value={row.is_active ? "active" : "cancelled"} label={row.is_active ? "Active" : "Inactive"} /></td>
                 <td>
                   <RowActions
                     onView={() => setViewing(row)}
                     onEdit={can("users.edit") ? () => setEditing(row) : undefined}
-                    onDelete={can("users.delete") && !row.is_superadmin && row.id !== me?.id ? () => remove(row.id) : undefined}
+                    onDelete={can("users.delete") && !row.is_superadmin && row.id !== me?.id ? async () => { await remove(row.id) } : undefined}
                     deleteName={row.full_name}
                   />
                 </td>
               </tr>
             ))}
-            {!loading && rows.length === 0 ? <EmptyRow colSpan={6}>No users match. Create a role first, then add the person.</EmptyRow> : null}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={4}>No users match. Create a role first, then add the person.</EmptyRow> : null}
           </tbody>
         </table>
       </div>
@@ -122,6 +122,7 @@ export function UsersPage() {
           ]}
           note={roles.length === 0 ? "There are no roles yet. Create a role under Users → Roles first." : undefined}
           submitLabel={editing === "new" ? "Create user" : "Save changes"}
+          successMessage={crudSuccessMessage(editing === "new")}
           onSubmit={save}
           onClose={() => setEditing(null)}
         />
@@ -135,6 +136,9 @@ export function UsersPage() {
             <dt>Role</dt><dd>{viewing.role_name || (viewing.is_superadmin ? "Super Admin (all access)" : "No role")}</dd>
             <dt>Status</dt><dd>{viewing.is_active ? "Active" : "Inactive"}</dd>
           </dl>
+          <div className="row" style={{ marginTop: 14 }}>
+            <button type="button" className="ghost" onClick={() => setViewing(null)}>Back</button>
+          </div>
         </Modal>
       ) : null}
     </>
@@ -174,6 +178,7 @@ function RoleEditor({
   onClose: () => void
   onSaved: () => void
 }) {
+  const toast = useToast()
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [name, setName] = useState(role?.name || "")
   const [description, setDescription] = useState(role?.description || "")
@@ -233,6 +238,7 @@ function RoleEditor({
       const body = JSON.stringify({ name, description, permission_codes: [...selected].sort() })
       if (role) await api(`/api/roles/${role.id}/`, { method: "PATCH", body })
       else await api("/api/roles/", { method: "POST", body })
+      toast.success(role ? "Role updated successfully" : "Role created successfully")
       onSaved()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the role")
@@ -318,7 +324,7 @@ function RoleEditor({
 
         <div className="row">
           {!readOnly ? <button className="primary" type="submit" disabled={busy || !catalog}>{busy ? "Saving…" : role ? "Save role" : "Create role"}</button> : null}
-          <button type="button" className="ghost" onClick={onClose}>{readOnly ? "Close" : "Cancel"}</button>
+          <button type="button" className="ghost" onClick={onClose}>{readOnly ? "Back" : "Cancel"}</button>
         </div>
       </form>
     </Modal>
@@ -327,53 +333,45 @@ function RoleEditor({
 
 export function RolesPage() {
   const { can } = useAuth()
-  const [search, setSearch] = useState("")
-  const { rows, loading, error, load, remove } = useList<Role>("/api/roles/", search)
+  const { rows: allRows, loading, error, load, remove } = useList<Role>("/api/roles/", "")
+  const pag = useClientPagination(allRows)
+  const rows = pag.rows
   const [editing, setEditing] = useState<Role | "new" | null>(null)
   const [viewing, setViewing] = useState<Role | null>(null)
-
-  const summary = useMemo(
-    () => (role: Role) => {
-      const manage = role.permission_codes.filter((code) => code.endsWith(".manage")).length
-      return `${role.permission_codes.length} permissions${manage ? ` · ${manage} full access` : ""}`
-    },
-    [],
-  )
 
   return (
     <>
       <PageTitle title="Roles" lede="A role is a set of permissions. Pick a module tab, then tick what the role may do on each submodule." />
       <Banner>{error}</Banner>
       <ListToolbar
-        search={search}
-        onSearch={setSearch}
-        placeholder="Search roles"
-        createLabel={can("roles.create") ? "New role" : undefined}
+        page={pag.page}
+        pageSize={pag.pageSize}
+        total={pag.total}
+        onPageChange={pag.setPage}
+        createLabel={can("roles.create") ? "Add new" : undefined}
         onCreate={() => setEditing("new")}
       />
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>Role</th><th>Description</th><th>Access</th><th>Users</th><th className="actions-col">Actions</th></tr>
+            <tr><th>Role</th><th>Users</th><th className="actions-col">Actions</th></tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
                 <td><strong>{row.name}</strong></td>
-                <td>{row.description || "—"}</td>
-                <td>{summary(row)}</td>
                 <td>{row.user_count}</td>
                 <td>
                   <RowActions
                     onView={() => setViewing(row)}
                     onEdit={can("roles.edit") ? () => setEditing(row) : undefined}
-                    onDelete={can("roles.delete") ? () => remove(row.id) : undefined}
+                    onDelete={can("roles.delete") ? async () => { await remove(row.id) } : undefined}
                     deleteName={row.name}
                   />
                 </td>
               </tr>
             ))}
-            {!loading && rows.length === 0 ? <EmptyRow colSpan={5}>No roles yet. Create one to start adding staff.</EmptyRow> : null}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={3}>No roles yet. Create one to start adding staff.</EmptyRow> : null}
           </tbody>
         </table>
       </div>

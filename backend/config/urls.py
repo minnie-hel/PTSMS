@@ -15,7 +15,7 @@ from accounts.views import (
     StaffView,
     UserViewSet,
 )
-from bookings.views import BookingViewSet, ItineraryViewSet, QuotationViewSet
+from bookings.views import AccommodationViewSet, BookingViewSet, ItineraryViewSet, QuotationViewSet
 from catalog.views import (
     BrandingView,
     ClientTypeViewSet,
@@ -60,6 +60,7 @@ router.register("clients", ClientViewSet, basename="client")
 router.register("activities", ActivityViewSet, basename="activity")
 router.register("vendors", VendorViewSet, basename="vendor")
 router.register("bookings", BookingViewSet, basename="booking")
+router.register("accommodations", AccommodationViewSet, basename="accommodation")
 router.register("quotations", QuotationViewSet, basename="quotation")
 router.register("itineraries", ItineraryViewSet, basename="itinerary")
 router.register("invoices", InvoiceViewSet, basename="invoice")

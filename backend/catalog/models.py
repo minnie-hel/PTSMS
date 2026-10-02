@@ -60,6 +60,9 @@ class CompanyProfile(models.Model):
     name = models.CharField(max_length=200, blank=True)
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=40, blank=True)
+    city = models.CharField(max_length=120, blank=True)
+    country = models.CharField(max_length=2, blank=True, default="TZ")
+    vrn_number = models.CharField(max_length=40, blank=True)
     address = models.TextField(blank=True)
     tagline = models.CharField(max_length=200, blank=True)
     welcome_title = models.CharField(max_length=200, blank=True)
@@ -67,6 +70,18 @@ class CompanyProfile(models.Model):
     logo = models.ImageField(upload_to="company/", blank=True, null=True)
     primary_color = models.CharField(max_length=7, blank=True)
     secondary_color = models.CharField(max_length=7, blank=True)
+    tin_number = models.CharField(max_length=40, blank=True)
+    bank_account_name = models.CharField(max_length=200, blank=True)
+    bank_account_number = models.CharField(max_length=80, blank=True)
+    bank_iban = models.CharField(max_length=80, blank=True)
+    bank_swift = models.CharField(max_length=40, blank=True)
+    bank_name = models.CharField(max_length=120, blank=True)
+    bank_branch = models.CharField(max_length=120, blank=True)
+    bank_branch_code = models.CharField(max_length=40, blank=True)
+    bank_correspondent = models.CharField(max_length=200, blank=True)
+    bank_correspondent_swift = models.CharField(max_length=40, blank=True)
+    invoice_terms = models.TextField(blank=True)
+    invoice_footer = models.TextField(blank=True)
 
     def save(self, *args, **kwargs):
         self.pk = 1

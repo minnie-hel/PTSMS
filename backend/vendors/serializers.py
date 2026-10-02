@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from bookings.services import stay_paid, stay_payment_status
 from vendors.models import Property, Vendor
+from vendors.services import default_lodge_property, sync_lodge_property
 
 
 class PropertySerializer(serializers.ModelSerializer):
@@ -59,29 +60,15 @@ class VendorSerializer(serializers.ModelSerializer):
         return [{"currency": code, "amount": amount} for code, amount in buckets.items()]
 
     def create(self, validated):
-        properties = validated.pop("properties", [])
+        validated.pop("properties", None)
         vendor = Vendor.objects.create(**validated)
-        for row in properties:
-            row.pop("id", None)
-            Property.objects.create(vendor=vendor, **row)
+        default_lodge_property(vendor)
         return vendor
 
     def update(self, instance, validated):
-        properties = validated.pop("properties", None)
+        validated.pop("properties", None)
         for key, value in validated.items():
             setattr(instance, key, value)
         instance.save()
-        if properties is not None:
-            keep = []
-            for row in properties:
-                prop_id = row.pop("id", None)
-                if prop_id:
-                    prop = instance.properties.get(pk=prop_id)
-                    for key, value in row.items():
-                        setattr(prop, key, value)
-                    prop.save()
-                    keep.append(prop.id)
-                else:
-                    keep.append(Property.objects.create(vendor=instance, **row).id)
-            instance.properties.exclude(id__in=keep).delete()
+        sync_lodge_property(instance)
         return instance

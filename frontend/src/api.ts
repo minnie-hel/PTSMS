@@ -9,6 +9,9 @@ export type CompanyProfile = {
   name: string
   email: string
   phone: string
+  city: string
+  country: string
+  vrn_number: string
   address: string
   tagline: string
   welcome_title: string
@@ -21,6 +24,18 @@ export type CompanyProfile = {
   logo_wide_dark_url: string
   primary_color: string
   secondary_color: string
+  tin_number: string
+  bank_account_name: string
+  bank_account_number: string
+  bank_iban: string
+  bank_swift: string
+  bank_name: string
+  bank_branch: string
+  bank_branch_code: string
+  bank_correspondent: string
+  bank_correspondent_swift: string
+  invoice_terms: string
+  invoice_footer: string
 }
 
 export async function fetchBranding(): Promise<CompanyProfile> {
@@ -91,14 +106,42 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
   }
   if (response.status === 204) return undefined as T
   const text = await response.text()
-  const data = text ? (JSON.parse(text) as unknown) : null
+  let data: unknown = null
+  if (text) {
+    try {
+      data = JSON.parse(text) as unknown
+    } catch {
+      throw new Error(
+        response.ok
+          ? "The server returned an unexpected response."
+          : "The server returned an error page instead of data. Check that the API is running and database migrations are applied.",
+      )
+    }
+  }
   if (!response.ok) throw new Error(errorMessage(data))
   return data as T
 }
 
+function withPageSize(path: string, size = 500): string {
+  if (path.includes("page_size=")) return path
+  return `${path}${path.includes("?") ? "&" : "?"}page_size=${size}`
+}
+
+/** Loads every row from a paginated list endpoint (dropdowns and small catalogs). */
 export async function apiList<T>(path: string): Promise<T[]> {
-  const data = await api<Page<T> | T[]>(path)
-  return Array.isArray(data) ? data : data.results
+  let nextPath: string | null = withPageSize(path)
+  const rows: T[] = []
+  while (nextPath) {
+    const page: Page<T> | T[] = await api<Page<T> | T[]>(nextPath)
+    if (Array.isArray(page)) {
+      rows.push(...page)
+      break
+    }
+    rows.push(...page.results)
+    if (!page.next) break
+    nextPath = page.next.replace(/^https?:\/\/[^/]+/, "") || null
+  }
+  return rows
 }
 
 export function emptyToNull(value: string | number | null | undefined) {

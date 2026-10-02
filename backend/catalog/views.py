@@ -60,10 +60,7 @@ class CompanyView(APIView):
         profile = CompanyProfile.load()
         serializer = CompanySerializer(profile, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        if request.FILES.get("logo"):
-            profile.logo = request.FILES["logo"]
-            profile.save(update_fields=["logo"])
+        profile = serializer.save()
         return Response(CompanySerializer(profile, context={"request": request}).data)
 
     def put(self, request):

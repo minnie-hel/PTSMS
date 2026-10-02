@@ -89,6 +89,25 @@ class Accommodation(models.Model):
         return (self.check_out - self.check_in).days
 
 
+class Traveller(models.Model):
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="travellers")
+    full_name = models.CharField(max_length=200)
+    nationality = models.CharField(max_length=80, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+    passport_number = models.CharField(max_length=40, blank=True)
+    passport_expiry = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=20, blank=True)
+    dietary_requirements = models.TextField(blank=True)
+    medical_notes = models.TextField(blank=True)
+    emergency_contact = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return self.full_name
+
+
 class Quotation(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"

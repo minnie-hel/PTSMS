@@ -116,7 +116,7 @@ def _build(source: Path, folder: Path, stem: str) -> None:
         wide.save(folder / f"{stem}-wide{suffix}.png", "PNG", optimize=True)
 
 
-def logo_variants(profile, request=None) -> dict[str, str]:
+def logo_variants(profile) -> dict[str, str]:
     """URLs of the generated logo variants, or empty strings when there is no usable logo."""
     keys = {
         "logo_dark_url": "-dark",
@@ -144,8 +144,15 @@ def logo_variants(profile, request=None) -> dict[str, str]:
         except OSError:
             return empty
 
+    from catalog.media_urls import browser_media_url
+
     result = {}
     for key, suffix in keys.items():
         url = f"{settings.MEDIA_URL}company/dark/{stem}{suffix}.png"
-        result[key] = request.build_absolute_uri(url) if request else url
+        result[key] = browser_media_url(url)
     return result
+
+
+def warm_logo_variants(profile) -> None:
+    """Pre-generate sidebar/dark logo files after a new logo is uploaded."""
+    logo_variants(profile)

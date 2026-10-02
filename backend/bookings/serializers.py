@@ -3,18 +3,21 @@ from django.db.models import ProtectedError
 from django.utils import timezone
 from rest_framework import serializers
 
-from bookings.models import Accommodation, Activity, Booking, Itinerary, Quotation
+from bookings.models import Accommodation, Activity, Booking, Itinerary, Quotation, Traveller
 from bookings.services import resolved_safari_status, stay_paid, stay_payment_status, vendor_payment_summary
 from catalog.models import Destination
 from common.audit import audit
 from common.numbers import next_code
 from crm.models import Client, Lead
 from crm.services import create_client_from_lead
+from finance.models import Invoice
 from finance.services import booking_profit, client_payment_summary
+from vendors.services import default_lodge_property
 
 
 class AccommodationSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
+    booking_reference = serializers.CharField(source="booking.reference", read_only=True)
     vendor_name = serializers.CharField(source="vendor.name", read_only=True)
     property_name = serializers.CharField(source="hotel.name", read_only=True)
     cost_currency_code = serializers.CharField(source="cost_currency.code", read_only=True)
@@ -26,6 +29,8 @@ class AccommodationSerializer(serializers.ModelSerializer):
         model = Accommodation
         fields = [
             "id",
+            "booking",
+            "booking_reference",
             "vendor",
             "vendor_name",
             "hotel",
@@ -44,6 +49,10 @@ class AccommodationSerializer(serializers.ModelSerializer):
             "amount_paid",
             "payment_status",
         ]
+        extra_kwargs = {
+            "hotel": {"required": False, "allow_null": True},
+            "booking": {"required": False},
+        }
 
     def get_amount_paid(self, stay):
         return stay_paid(stay)
@@ -64,7 +73,29 @@ class AccommodationSerializer(serializers.ModelSerializer):
         currency = data.get("cost_currency", getattr(self.instance, "cost_currency", None))
         if cost and not currency:
             raise serializers.ValidationError({"cost_currency": "Choose the currency of the hotel cost."})
+        if vendor and not hotel:
+            data["hotel"] = default_lodge_property(vendor)
         return data
+
+
+class TravellerSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)
+
+    class Meta:
+        model = Traveller
+        fields = [
+            "id",
+            "full_name",
+            "nationality",
+            "date_of_birth",
+            "passport_number",
+            "passport_expiry",
+            "gender",
+            "dietary_requirements",
+            "medical_notes",
+            "emergency_contact",
+        ]
+        extra_kwargs = {"booking": {"required": False}}
 
 
 class BookingSerializer(serializers.ModelSerializer):
@@ -74,6 +105,7 @@ class BookingSerializer(serializers.ModelSerializer):
     )
     destination_names = serializers.SerializerMethodField()
     accommodations = AccommodationSerializer(many=True, required=False)
+    travellers = TravellerSerializer(many=True, required=False)
     client_name = serializers.CharField(source="client.full_name", read_only=True)
     client_country = serializers.CharField(source="client.country", read_only=True)
     currency_code = serializers.CharField(source="currency.code", read_only=True)
@@ -119,6 +151,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "assigned_to",
             "assigned_name",
             "accommodations",
+            "travellers",
             "client_payment_status",
             "vendor_payment_status",
             "amount_paid",
@@ -180,6 +213,11 @@ class BookingSerializer(serializers.ModelSerializer):
                 stay["amount_paid"] = None
                 stay["cost_currency"] = None
                 stay["cost_currency_code"] = None
+        if not user.has_code("bookings.edit"):
+            for traveller in data.get("travellers", []):
+                traveller["passport_number"] = None
+                traveller["passport_expiry"] = None
+                traveller["medical_notes"] = None
         return data
 
     def validate(self, data):
@@ -189,6 +227,13 @@ class BookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"end_date": "End date cannot be before the start date."})
         if not self.instance and not data.get("client") and not data.get("lead"):
             raise serializers.ValidationError("Choose a client, or a lead so the client can be created.")
+        overall = data.get("overall_status") or getattr(self.instance, "overall_status", None)
+        if overall == Booking.Overall.COMPLETED:
+            booking = self.instance
+            if booking and not booking.invoices.exclude(status=Invoice.Status.CANCELLED).exists():
+                raise serializers.ValidationError(
+                    {"overall_status": "Create an invoice on this booking before marking it completed."}
+                )
         return data
 
     def _visible_costs(self, stays):
@@ -199,6 +244,20 @@ class BookingSerializer(serializers.ModelSerializer):
             row.pop("agreed_cost", None)
             row.pop("cost_currency", None)
         return stays
+
+    def _sync_travellers(self, booking, rows):
+        keep = []
+        for row in rows:
+            traveller_id = row.pop("id", None)
+            if traveller_id:
+                traveller = booking.travellers.get(pk=traveller_id)
+                for key, value in row.items():
+                    setattr(traveller, key, value)
+                traveller.save()
+                keep.append(traveller.id)
+            else:
+                keep.append(Traveller.objects.create(booking=booking, **row).id)
+        booking.travellers.exclude(id__in=keep or [0]).delete()
 
     def _sync_stays(self, booking, stays):
         stays = self._visible_costs(stays)
@@ -242,6 +301,7 @@ class BookingSerializer(serializers.ModelSerializer):
     def create(self, validated):
         destinations = validated.pop("destinations", [])
         stays = self._visible_costs(validated.pop("accommodations", []))
+        travellers = validated.pop("travellers", [])
         validated = self._attach_client(validated)
         lead = validated.get("lead")
         if lead and not validated.get("assigned_to") and lead.assigned_to_id:
@@ -253,6 +313,9 @@ class BookingSerializer(serializers.ModelSerializer):
         for row in stays:
             row.pop("id", None)
             Accommodation.objects.create(booking=booking, **row)
+        for row in travellers:
+            row.pop("id", None)
+            Traveller.objects.create(booking=booking, **row)
         if lead and lead.status != Lead.Status.WON:
             lead.status = Lead.Status.WON
             lead.save(update_fields=["status", "updated_at"])
@@ -271,6 +334,7 @@ class BookingSerializer(serializers.ModelSerializer):
     def update(self, instance, validated):
         destinations = validated.pop("destinations", None)
         stays = validated.pop("accommodations", None)
+        travellers = validated.pop("travellers", None)
         validated.pop("lead", None)
         validated.pop("client", None) if "client" in validated and instance.payments.exists() else None
         for key, value in validated.items():
@@ -280,6 +344,8 @@ class BookingSerializer(serializers.ModelSerializer):
             instance.destinations.set(destinations)
         if stays is not None:
             self._sync_stays(instance, stays)
+        if travellers is not None:
+            self._sync_travellers(instance, travellers)
         return instance
 
 
@@ -335,17 +401,21 @@ class QuotationSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         booking = data.get("booking") or getattr(self.instance, "booking", None)
-        if booking and booking.quotations.filter(status=Quotation.Status.ACCEPTED).exclude(
-            pk=getattr(self.instance, "pk", None)
-        ).exists() and not self.instance:
-            raise serializers.ValidationError("This booking already has an accepted quotation.")
+        if booking and not self.instance:
+            active = booking.quotations.exclude(status=Quotation.Status.DECLINED)
+            if active.exists():
+                raise serializers.ValidationError(
+                    "This booking already has a quotation. Open it from the booking or quotation list."
+                )
         return data
 
     @transaction.atomic
     def create(self, validated):
         booking = validated["booking"]
-        if booking.quotations.filter(status=Quotation.Status.ACCEPTED).exists():
-            raise serializers.ValidationError("This booking already has an accepted quotation.")
+        if booking.quotations.exclude(status=Quotation.Status.DECLINED).exists():
+            raise serializers.ValidationError(
+                "This booking already has a quotation. Open it from the booking or quotation list."
+            )
         validated["client"] = booking.client
         validated.setdefault("total_amount", booking.total_amount)
         validated.setdefault("currency", booking.currency)

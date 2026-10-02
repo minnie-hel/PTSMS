@@ -9,6 +9,7 @@ from accounts.permissions import HasAnyCode, HasCode
 from bookings.models import Activity
 from common.mixins import AuditMixin, ProtectedDestroyMixin
 from crm.models import Client, Lead
+from crm.profile import build_client_profile
 from crm.serializers import ActivitySerializer, ClientSerializer, LeadConvertSerializer, LeadSerializer
 
 
@@ -47,6 +48,11 @@ class ClientViewSet(AuditMixin, ProtectedDestroyMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Client.objects.select_related("client_type", "source", "assigned_to")
+
+    @action(detail=True, methods=["get"])
+    def profile(self, request, pk=None):
+        client = self.get_object()
+        return Response(build_client_profile(client, request.user))
 
 
 class ActivityViewSet(viewsets.ModelViewSet):
