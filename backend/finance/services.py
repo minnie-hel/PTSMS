@@ -50,6 +50,54 @@ def add_bucket(buckets, code, amount):
     buckets[code] = buckets.get(code, Decimal("0")) + (amount or Decimal("0"))
 
 
+def profitability_summary(booking):
+    """Selling price, direct costs, gross profit, and client payment position for one booking."""
+    profit = booking_profit(booking)
+    pay = client_payment_summary(booking)
+    fee_code = profit["fee"]["currency"]
+    fee_amt = booking.total_amount or Decimal("0")
+    gp_amt = profit["gross_profit"]["amount"] or Decimal("0")
+    return {
+        "id": booking.id,
+        "reference": booking.reference,
+        "client": booking.client.full_name,
+        "start_date": booking.start_date,
+        "end_date": booking.end_date,
+        "overall_status": booking.overall_status,
+        "selling_price": {"currency": fee_code, "amount": fee_amt},
+        "direct_costs": {"currency": fee_code, "amount": fee_amt - gp_amt},
+        "gross_profit": profit["gross_profit"],
+        "amount_received": {"currency": fee_code, "amount": pay["paid"]},
+        "outstanding": {"currency": fee_code, "amount": pay["balance"]},
+        "client_payment_status": pay["status"],
+        "unconverted_costs": profit["unconverted_costs"],
+    }
+
+
+def profitability_detail(booking):
+    """Cost breakdown by category plus summary fields for the profitability detail view."""
+    from collections import defaultdict
+
+    summary = profitability_summary(booking)
+    fee_code = booking.currency.code
+    lines = []
+    accommodation = Decimal("0")
+    for stay in booking.accommodations.select_related("cost_currency", "hotel"):
+        if stay.agreed_cost and stay.cost_currency_id and stay.cost_currency.code == fee_code:
+            accommodation += stay.agreed_cost
+    if accommodation:
+        lines.append({"category": "Accommodation", "amount": accommodation})
+    by_category = defaultdict(lambda: Decimal("0"))
+    for expense in booking.expenses.select_related("category", "currency"):
+        if expense.currency.code == fee_code:
+            label = expense.category.name if expense.category_id else "Other"
+            by_category[label] += expense.amount
+    for label, amount in sorted(by_category.items()):
+        lines.append({"category": label, "amount": amount})
+    summary["cost_breakdown"] = lines
+    return summary
+
+
 def booking_profit(booking):
     fee_code = booking.currency.code
     hotel = {}

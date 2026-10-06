@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
+import { sanitizeUserMessage } from "./errors"
 
 type ToastItem = { id: number; message: string; tone: "success" | "error" }
 
@@ -12,8 +13,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([])
 
   const push = useCallback((message: string, tone: ToastItem["tone"]) => {
+    const text = sanitizeUserMessage(message, tone === "error" ? "Something went wrong. Please try again." : message)
+    if (!text) return
     const id = Date.now() + Math.random()
-    setItems((current) => [...current, { id, message, tone }])
+    setItems((current) => {
+      if (current.some((item) => item.message === text && item.tone === tone)) return current
+      return [...current, { id, message: text, tone }]
+    })
     window.setTimeout(() => {
       setItems((current) => current.filter((item) => item.id !== id))
     }, 4200)
@@ -21,6 +27,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const success = useCallback((message: string) => push(message, "success"), [push])
   const error = useCallback((message: string) => push(message, "error"), [push])
+
+  useEffect(() => {
+    function onError(event: Event) {
+      const message = (event as CustomEvent<string>).detail
+      if (typeof message === "string" && message) error(message)
+    }
+    window.addEventListener("ptsms:error", onError)
+    return () => window.removeEventListener("ptsms:error", onError)
+  }, [error])
 
   return (
     <ToastContext.Provider value={{ success, error }}>

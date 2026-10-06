@@ -11,7 +11,7 @@ from common.numbers import next_code
 from crm.models import Client, Lead
 from crm.services import create_client_from_lead
 from finance.models import Invoice
-from finance.services import booking_profit, client_payment_summary
+from finance.services import client_payment_summary
 from vendors.services import default_lodge_property
 
 
@@ -117,7 +117,6 @@ class BookingSerializer(serializers.ModelSerializer):
     vendor_payment_status = serializers.SerializerMethodField()
     amount_paid = serializers.SerializerMethodField()
     balance = serializers.SerializerMethodField()
-    profit = serializers.SerializerMethodField()
     quotation_id = serializers.SerializerMethodField()
     itinerary_id = serializers.SerializerMethodField()
     invoice_id = serializers.SerializerMethodField()
@@ -156,7 +155,6 @@ class BookingSerializer(serializers.ModelSerializer):
             "vendor_payment_status",
             "amount_paid",
             "balance",
-            "profit",
             "quotation_id",
             "itinerary_id",
             "invoice_id",
@@ -178,12 +176,6 @@ class BookingSerializer(serializers.ModelSerializer):
 
     def get_balance(self, booking):
         return client_payment_summary(booking)["balance"]
-
-    def get_profit(self, booking):
-        user = self.context["request"].user
-        if not user.has_code("profitability.view"):
-            return None
-        return booking_profit(booking)
 
     def get_quotation_id(self, booking):
         accepted = next((item.id for item in booking.quotations.all() if item.status == Quotation.Status.ACCEPTED), None)

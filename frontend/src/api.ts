@@ -1,8 +1,25 @@
+import { emitAppError, FALLBACK_ERROR, messageFromResponse } from "./errors"
+
 export type Page<T> = {
   count: number
   next: string | null
   previous: string | null
   results: T[]
+}
+
+export type CompanyBankAccount = {
+  id?: number
+  currency: number | null
+  currency_code?: string
+  account_name: string
+  account_number: string
+  iban: string
+  swift: string
+  bank_name: string
+  branch: string
+  branch_code: string
+  correspondent: string
+  correspondent_swift: string
 }
 
 export type CompanyProfile = {
@@ -34,6 +51,7 @@ export type CompanyProfile = {
   bank_branch_code: string
   bank_correspondent: string
   bank_correspondent_swift: string
+  banks?: CompanyBankAccount[]
   invoice_terms: string
   invoice_footer: string
 }
@@ -54,20 +72,6 @@ export type SessionUser = {
   is_superadmin: boolean
   is_active: boolean
   permissions: string[]
-}
-
-type ErrorBody = Record<string, unknown>
-
-function errorMessage(data: unknown): string {
-  if (!data || typeof data !== "object") return "The request failed."
-  const body = data as ErrorBody
-  if (typeof body.detail === "string") return body.detail
-  if (Array.isArray(body.non_field_errors)) return body.non_field_errors.join(" ")
-  const lines = Object.entries(body).map(([key, value]) => {
-    const text = Array.isArray(value) ? value.join(" ") : String(value)
-    return key === "non_field_errors" ? text : `${key}: ${text}`
-  })
-  return lines.join(" ") || "The request failed."
 }
 
 async function refreshAccess(): Promise<boolean> {
@@ -101,8 +105,10 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
     const refreshed = await refreshAccess()
     if (refreshed) return api<T>(path, options, false)
     clearSession()
+    const ended = "Your session has ended. Sign in again."
+    emitAppError(ended)
     if (!window.location.pathname.startsWith("/login")) window.location.assign("/login")
-    throw new Error("Your session has ended. Sign in again.")
+    throw new Error(ended)
   }
   if (response.status === 204) return undefined as T
   const text = await response.text()
@@ -111,14 +117,18 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
     try {
       data = JSON.parse(text) as unknown
     } catch {
-      throw new Error(
-        response.ok
-          ? "The server returned an unexpected response."
-          : "The server returned an error page instead of data. Check that the API is running and database migrations are applied.",
-      )
+      const message = response.ok
+        ? "The server returned an unexpected response."
+        : FALLBACK_ERROR
+      if (!response.ok) emitAppError(message)
+      throw new Error(message)
     }
   }
-  if (!response.ok) throw new Error(errorMessage(data))
+  if (!response.ok) {
+    const message = messageFromResponse(data, response.status)
+    emitAppError(message)
+    throw new Error(message)
+  }
   return data as T
 }
 

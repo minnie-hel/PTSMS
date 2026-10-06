@@ -1,3 +1,5 @@
+import json
+
 from rest_framework import serializers, viewsets
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
@@ -58,7 +60,20 @@ class CompanyView(APIView):
 
     def _save(self, request):
         profile = CompanyProfile.load()
-        serializer = CompanySerializer(profile, data=request.data, partial=True, context={"request": request})
+        data = request.data
+        if hasattr(data, "lists"):
+            payload = {key: data.get(key) for key in data}
+            if "logo" in request.FILES:
+                payload["logo"] = request.FILES["logo"]
+            banks = payload.get("banks")
+            if isinstance(banks, str):
+                try:
+                    payload["banks"] = json.loads(banks or "[]")
+                except json.JSONDecodeError as exc:
+                    raise serializers.ValidationError({"banks": "Bank details could not be read."}) from exc
+        else:
+            payload = data
+        serializer = CompanySerializer(profile, data=payload, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         profile = serializer.save()
         return Response(CompanySerializer(profile, context={"request": request}).data)

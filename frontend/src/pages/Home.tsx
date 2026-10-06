@@ -42,7 +42,7 @@ export function DashboardPage() {
   useEffect(() => {
     api<DashboardData>("/api/dashboard/")
       .then(setData)
-      .catch((err: Error) => setError(err.message))
+      .catch(() => {})
     apiList("/api/currencies/").then(setCurrencies).catch(() => setCurrencies([]))
   }, [])
 
@@ -60,7 +60,7 @@ export function DashboardPage() {
         { label: "Payments received", value: <MoneyCardAmounts rows={data.payments_received} />, to: "/payments", icon: <IconWallet />, tone: "green", money: true },
         { label: "Outstanding", value: <MoneyCardAmounts rows={data.outstanding} />, to: "/invoices", icon: <IconWallet />, tone: "amber", money: true },
         { label: "Total expenses", value: <MoneyCardAmounts rows={data.expenses} />, to: "/expenses", icon: <IconWallet />, tone: "rose", money: true },
-        { label: "Gross profit", value: <MoneyCardAmounts rows={data.gross_profit} />, to: "/reports", icon: <IconWallet />, tone: "teal", money: true },
+        { label: "Gross profit", value: <MoneyCardAmounts rows={data.gross_profit} />, to: "/profit", icon: <IconWallet />, tone: "teal", money: true },
       ]
     : []
 
@@ -85,7 +85,8 @@ export function DashboardPage() {
 }
 
 type FollowUpRow = { kind: string; id: number; name: string; reference: string; date: string; state: string }
-type LeadOption = { id: number; full_name: string; reference: string }
+type FollowUpTarget = { id: number; full_name: string; reference: string }
+type LeadOption = FollowUpTarget
 
 const STATE_LABEL: Record<string, string> = { overdue: "Overdue", due: "Due today", upcoming: "Upcoming" }
 
@@ -107,14 +108,18 @@ export function FollowUpsPage() {
   const [kind, setKind] = useState("")
   const [error, setError] = useState("")
   const [form, setForm] = useState<FollowUpRow | "new" | null>(null)
-  const [leads, setLeads] = useState<LeadOption[]>([])
+  const [leadTargets, setLeadTargets] = useState<FollowUpTarget[]>([])
+  const [clientTargets, setClientTargets] = useState<FollowUpTarget[]>([])
 
   function load() {
-    api<FollowUpRow[]>("/api/follow-ups/").then(setRows).catch((err: Error) => setError(err.message))
+    api<FollowUpRow[]>("/api/follow-ups/")
+      .then((data) => { setRows(data); setError("") })
+      .catch(() => {})
   }
   useEffect(() => {
     load()
-    apiList<LeadOption>("/api/leads/?page_size=200").then(setLeads).catch(() => setLeads([]))
+    apiList<FollowUpTarget>("/api/leads/?page_size=200").then(setLeadTargets).catch(() => setLeadTargets([]))
+    apiList<FollowUpTarget>("/api/clients/?page_size=200").then(setClientTargets).catch(() => setClientTargets([]))
   }, [])
 
   const shown = rows.filter((row) => (!stateTab || row.state === stateTab) && (!kind || row.kind === kind))
@@ -171,17 +176,35 @@ export function FollowUpsPage() {
       </div>
       {form ? (
         <RecordForm
+          formKey={form === "new" ? "new" : `${form.kind}-${form.id}`}
           title={form === "new" ? "Schedule follow-up" : `Follow-up for ${form.name}`}
           initial={form === "new" ? {} : { date: form.date }}
-          fields={[
-            ...(form === "new"
-              ? [{ name: "lead", label: "Lead", type: "select" as const, required: true, options: leads.map((lead) => ({ value: lead.id, label: `${lead.full_name} (${lead.reference})` })) }]
-              : []),
-            { name: "date", label: "Follow-up date", type: "date", required: true },
-          ]}
+          fields={
+            form === "new"
+              ? [
+                  {
+                    name: "target_id",
+                    label: "Lead or client",
+                    type: "select" as const,
+                    required: true,
+                    options: [
+                      ...leadTargets.map((lead) => ({ value: `lead:${lead.id}`, label: `Lead · ${lead.full_name} (${lead.reference})` })),
+                      ...clientTargets.map((client) => ({ value: `client:${client.id}`, label: `Client · ${client.full_name} (${client.reference})` })),
+                    ],
+                    empty: leadTargets.length || clientTargets.length ? "Choose" : "No leads or clients loaded",
+                  },
+                  { name: "date", label: "Follow-up date", type: "date", required: true },
+                ]
+              : [{ name: "date", label: "Follow-up date", type: "date", required: true }]
+          }
           onSubmit={async (values) => {
-            const target = form === "new" ? `/api/leads/${values.lead}/` : path(form)
-            await api(target, { method: "PATCH", body: JSON.stringify({ next_follow_up: values.date }) })
+            if (form === "new") {
+              const [kind, rawId] = values.target_id.split(":")
+              if (!kind || !rawId) throw new Error("Choose a lead or client.")
+              await api(`/api/${kind}s/${rawId}/`, { method: "PATCH", body: JSON.stringify({ next_follow_up: values.date }) })
+            } else {
+              await api(path(form), { method: "PATCH", body: JSON.stringify({ next_follow_up: values.date }) })
+            }
             setForm(null)
             load()
           }}
@@ -213,7 +236,7 @@ export function ActivitiesPage() {
   const [leads, setLeads] = useState<LeadOption[]>([])
 
   function load() {
-    apiList<ActivityRow>("/api/activities/?page_size=200").then(setRows).catch((err: Error) => setError(err.message))
+    apiList<ActivityRow>("/api/activities/?page_size=200").then(setRows).catch(() => {})
   }
   useEffect(() => {
     load()
@@ -341,7 +364,7 @@ export function OperationsPage() {
   }, {})
   return (
     <>
-      <PageTitle title="Safari operations" lede="Active and confirmed files. Vehicles and guides are not part of this version." />
+      <PageTitle title="Safari operations"/>
       <div className="list-screen no-print">
         <ModuleStatusTabs tabs={OPS_TABS} active={statusTab} onChange={setStatusTab} counts={tabCounts} />
         <ListToolbar page={pag.page} pageSize={pag.pageSize} total={pag.total} onPageChange={pag.setPage} />

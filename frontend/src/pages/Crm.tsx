@@ -162,7 +162,7 @@ export function LeadDetailPage() {
   const [editing, setEditing] = useState(false)
 
   function load() {
-    api<Lead>(`/api/leads/${id}/`).then(setLead).catch((err: Error) => setError(err.message))
+    api<Lead>(`/api/leads/${id}/`).then(setLead).catch(() => {})
     apiList<typeof activities[number]>(`/api/activities/?lead=${id}&page_size=100`).then(setActivities).catch(() => setActivities([]))
   }
   useEffect(() => { load() }, [id])
@@ -317,8 +317,8 @@ function LeadForm({ initial, onClose, onSaved }: { initial?: Lead; onClose: () =
       })
       toast.success(initial ? "Lead updated successfully" : "Lead created successfully")
       onSaved()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the lead")
+    } catch {
+      // toasted
     }
   }
 
@@ -692,8 +692,8 @@ function ClientForm({ initial, onClose, onSaved }: { initial?: ClientRow; onClos
       })
       toast.success(initial ? "Client updated successfully" : "Client created successfully")
       onSaved()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save")
+    } catch {
+      // toasted
     }
   }
   return (

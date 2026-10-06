@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { api } from "./api"
+import { sanitizeUserMessage } from "./errors"
 import { useAuth } from "./auth"
 import { SideLogo } from "./company"
 import { useTheme } from "./theme"
@@ -115,6 +116,11 @@ export function PageTitle({
 
 export function Banner({ children }: { children: ReactNode }) {
   if (!children) return null
+  if (typeof children === "string") {
+    const text = sanitizeUserMessage(children, "")
+    if (!text) return null
+    return <div className="banner">{text}</div>
+  }
   return <div className="banner">{children}</div>
 }
 

@@ -94,3 +94,25 @@ class CompanyProfile(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class CompanyBankAccount(models.Model):
+    company = models.ForeignKey(CompanyProfile, on_delete=models.CASCADE, related_name="banks")
+    currency = models.ForeignKey(Currency, null=True, blank=True, on_delete=models.SET_NULL, related_name="company_banks")
+    account_name = models.CharField(max_length=200, blank=True)
+    account_number = models.CharField(max_length=80, blank=True)
+    iban = models.CharField(max_length=80, blank=True)
+    swift = models.CharField(max_length=40, blank=True)
+    bank_name = models.CharField(max_length=120, blank=True)
+    branch = models.CharField(max_length=120, blank=True)
+    branch_code = models.CharField(max_length=40, blank=True)
+    correspondent = models.CharField(max_length=200, blank=True)
+    correspondent_swift = models.CharField(max_length=40, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        code = self.currency.code if self.currency_id else "—"
+        return f"{self.bank_name or 'Bank'} ({code})"

@@ -6,6 +6,8 @@ from rest_framework import serializers
 from bookings.models import Itinerary, Quotation
 from catalog.models import Currency
 from common.numbers import next_code
+from bookings.services import stay_payment_status
+
 from finance.models import ClientPayment, Expense, Invoice, VendorPayment
 from finance.invoice_document import default_line_description, default_line_title
 from finance.services import client_payment_summary, invoice_amounts, invoice_effective_status
@@ -215,6 +217,7 @@ class VendorPaymentSerializer(serializers.ModelSerializer):
     amount_applied = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
     currency = serializers.PrimaryKeyRelatedField(queryset=Currency.objects.all(), required=False)
     method_name = serializers.CharField(source="payment_method.name", read_only=True)
+    stay_payment_status = serializers.SerializerMethodField()
 
     class Meta:
         model = VendorPayment
@@ -232,11 +235,15 @@ class VendorPaymentSerializer(serializers.ModelSerializer):
             "amount_applied",
             "payment_method",
             "method_name",
+            "stay_payment_status",
             "reference",
             "notes",
             "created_at",
         ]
         read_only_fields = ["created_at"]
+
+    def get_stay_payment_status(self, payment):
+        return stay_payment_status(payment.accommodation)
 
     def validate(self, data):
         stay = data.get("accommodation") or getattr(self.instance, "accommodation", None)

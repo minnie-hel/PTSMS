@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import { clearSession } from "../api"
 import { LogoImage, useCompany } from "../company"
 import { PageTitle } from "../ui"
+import { emitAppError } from "../errors"
 import { ModuleCard, type Tone } from "../cards"
 import {
   IconBed,
@@ -63,12 +64,15 @@ async function fetchReport(path: string) {
   })
   if (response.status === 401) {
     clearSession()
+    emitAppError("Your session has ended. Sign in again.")
     window.location.assign("/login")
-    throw new Error("Session ended")
+    throw new Error("Your session has ended. Sign in again.")
   }
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    throw new Error((data as { detail?: string }).detail || "Could not load report")
+    const message = (data as { detail?: string }).detail || "Could not load the report."
+    emitAppError(message)
+    throw new Error(message)
   }
   if (path.includes("format=csv")) return response.blob()
   return response.json()
@@ -85,7 +89,7 @@ export function ModuleReportsPage() {
   useEffect(() => {
     fetchReport("/api/reports/")
       .then((data) => setIndex(data as ReportIndex))
-      .catch((err: Error) => setError(err.message))
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -97,7 +101,7 @@ export function ModuleReportsPage() {
     setError("")
     fetchReport(`/api/reports/?module=${module}`)
       .then((data) => setReport(data as ModuleReport))
-      .catch((err: Error) => setError(err.message))
+      .catch(() => {})
       .finally(() => setLoading(false))
   }, [module])
 
@@ -111,8 +115,8 @@ export function ModuleReportsPage() {
       link.download = `ptsms-${module}.csv`
       link.click()
       URL.revokeObjectURL(url)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Export failed")
+    } catch {
+      // toasted
     }
   }
 

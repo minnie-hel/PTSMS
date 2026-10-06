@@ -7,9 +7,9 @@ function listDeleteUrl(path: string, id: number | string) {
 }
 import { Link } from "react-router-dom"
 import { api, apiList } from "./api"
-import { Banner, Field, Modal } from "./ui"
+import { Field, Modal } from "./ui"
 import type { ExportFormat } from "./export"
-import { IconEdit, IconEye, IconFilter, IconPlus, IconSettings, IconTrash } from "./icons"
+import { IconEdit, IconEye, IconFilter, IconPlus, IconTrash } from "./icons"
 import { useToast } from "./toast"
 
 /** Delays a fast-changing value (a search box) so the list is not reloaded on every keystroke. */
@@ -37,7 +37,7 @@ export function useList<T>(path: string, search: string, filters: Record<string,
     setLoading(true)
     apiList<T>(`${path}?${query.toString()}`)
       .then((data) => { setRows(data); setError("") })
-      .catch((err: Error) => setError(err.message))
+      .catch(() => { setRows([]); setError("") })
       .finally(() => setLoading(false))
   }
   useEffect(() => {
@@ -55,8 +55,6 @@ export function useList<T>(path: string, search: string, filters: Record<string,
       setError("")
       load()
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not delete this record"
-      setError(message)
       throw err
     }
   }
@@ -306,9 +304,6 @@ export function ListToolbar({
           </div>
         </div>
         <div className="list-toolbar-end">
-          <button type="button" className="button icon-btn-text" title="Columns" aria-label="Columns" disabled>
-            <IconSettings />
-          </button>
           {filterFields?.length && onFilterChange ? (
             <div className="list-filter-menu">
               <button type="button" className={`button icon-btn-text ${filtersOpen ? "active" : ""}`} onClick={() => setFiltersOpen((open) => !open)}>
@@ -396,18 +391,16 @@ export function RowActions({ onView, viewTo, onEdit, editTo, onDelete, deleteNam
   const toast = useToast()
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
 
   async function confirm() {
     if (!onDelete) return
     setBusy(true)
-    setError("")
     try {
       await onDelete()
       toast.success("Deleted successfully")
       setConfirming(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete")
+    } catch {
+      // API errors are shown as toasts.
     } finally {
       setBusy(false)
     }
@@ -427,7 +420,6 @@ export function RowActions({ onView, viewTo, onEdit, editTo, onDelete, deleteNam
       {confirming ? (
         <Modal title="Delete this record?" onClose={() => setConfirming(false)}>
           <div className="stack">
-            <Banner>{error}</Banner>
             <p>{deleteName ? <><strong>{deleteName}</strong> will be removed.</> : "This record will be removed."} This cannot be undone.</p>
             <div className="row">
               <button type="button" className="danger-btn" disabled={busy} onClick={confirm}>{busy ? "Deleting…" : "Delete"}</button>
@@ -539,23 +531,20 @@ export function RecordForm({
     )
   }
   const [values, setValues] = useState<Record<string, string>>(valuesFromInitial)
-  const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     setValues(valuesFromInitial())
-    setError("")
   }, [title, formKey])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     setBusy(true)
-    setError("")
     try {
       await onSubmit(values)
       toast.success(successMessage ?? "Saved successfully")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save")
+    } catch {
+      // API errors are shown as toasts.
     } finally {
       setBusy(false)
     }
@@ -564,7 +553,6 @@ export function RecordForm({
   return (
     <Modal title={title} onClose={onClose}>
       <form onSubmit={submit} className="form-grid">
-        {error ? <div className="wide"><Banner>{error}</Banner></div> : null}
         {note ? <div className="wide muted">{note}</div> : null}
         {fields.map((field) => {
           const value = values[field.name] ?? ""

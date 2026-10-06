@@ -78,7 +78,9 @@ class FollowUpView(APIView):
     def get(self, request):
         today = timezone.localdate()
         rows = []
-        leads = Lead.objects.exclude(next_follow_up=None).exclude(status__in=[Lead.Status.WON, Lead.Status.LOST, Lead.Status.UNQUALIFIED])
+        leads = Lead.objects.exclude(next_follow_up=None).exclude(
+            status__in=[Lead.Status.LOST, Lead.Status.UNQUALIFIED]
+        )
         for lead in leads:
             rows.append(
                 {

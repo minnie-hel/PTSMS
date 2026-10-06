@@ -40,6 +40,7 @@ const emptyCompany: CompanyProfile = {
   bank_branch_code: "",
   bank_correspondent: "",
   bank_correspondent_swift: "",
+  banks: [],
   invoice_terms: "",
   invoice_footer: "",
 }
@@ -125,6 +126,17 @@ export function CompanyMark({ large, compact }: { large?: boolean; compact?: boo
   const label = company.name || DEFAULT_BRAND_NAME
   const className = large ? "brand-text brand-text-lg" : compact ? "brand-text brand-text-side" : "brand-text"
   return <strong className={className}>{label}</strong>
+}
+
+/** One image on login — avoids double logo nodes and extra vertical gap. */
+export function LoginBrandLogo() {
+  const { company } = useCompany()
+  const { mode } = useTheme()
+  if (!company.logo_url) {
+    return <strong className="login-logo-fallback">{company.name || DEFAULT_BRAND_NAME}</strong>
+  }
+  const src = mode === "dark" && company.logo_dark_url ? company.logo_dark_url : company.logo_url
+  return <img className="login-logo-img" src={src} alt={company.name || "Company logo"} />
 }
 
 export function DocumentCompanyLine() {

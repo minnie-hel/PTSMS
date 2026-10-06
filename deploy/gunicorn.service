@@ -1,0 +1,19 @@
+[Unit]
+Description=PTSMS gunicorn
+After=network.target postgresql.service
+
+[Service]
+User=ptsms
+Group=www-data
+WorkingDirectory=/srv/ptsms/backend
+EnvironmentFile=/srv/ptsms/backend/.env
+RuntimeDirectory=ptsms
+ExecStart=/srv/ptsms/backend/.venv/bin/gunicorn \
+    --workers 3 \
+    --bind unix:/run/ptsms/gunicorn.sock \
+    config.wsgi:application
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

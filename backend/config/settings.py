@@ -2,6 +2,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -17,11 +19,24 @@ def _load_env_file():
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
+def _csv(name, default=""):
+    raw = os.environ.get(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _truthy(name, default="0"):
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
 _load_env_file()
 
 SECRET_KEY = os.environ.get("PTSMS_SECRET_KEY", "dev-only-ptsms-change-this-key")
-DEBUG = os.environ.get("PTSMS_DEBUG", "1") == "1"
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+DEBUG = _truthy("PTSMS_DEBUG", "1")
+ALLOWED_HOSTS = _csv("PTSMS_ALLOWED_HOSTS", "localhost,127.0.0.1")
+if not DEBUG and SECRET_KEY in {"", "dev-only-ptsms-change-this-key", "change-me-in-production"}:
+    raise ImproperlyConfigured("Set PTSMS_SECRET_KEY to a long random value when PTSMS_DEBUG=0.")
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured("Set PTSMS_ALLOWED_HOSTS when PTSMS_DEBUG=0.")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -106,15 +121,29 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = Path(os.environ.get("PTSMS_STATIC_ROOT", BASE_DIR / "staticfiles"))
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = Path(os.environ.get("PTSMS_MEDIA_ROOT", BASE_DIR / "media"))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.User"
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+CORS_ALLOWED_ORIGINS = _csv(
+    "PTSMS_CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+)
+CSRF_TRUSTED_ORIGINS = _csv(
+    "PTSMS_CSRF_TRUSTED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+)
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+if _truthy("PTSMS_HTTPS", "0"):
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = _truthy("PTSMS_SSL_REDIRECT", "0")
+    SECURE_HSTS_SECONDS = int(os.environ.get("PTSMS_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = False
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

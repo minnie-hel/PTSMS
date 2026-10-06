@@ -30,10 +30,10 @@ export function SystemReportsPage() {
   useEffect(() => {
     apiList<ActivityRow>("/api/activities/?page_size=200")
       .then(setActivities)
-      .catch((err: Error) => setError(err.message))
+      .catch(() => {})
     api<{ results: AuditRow[] }>("/api/audit-logs/?limit=200")
       .then((data) => setAudits(data.results))
-      .catch((err: Error) => setError(err.message))
+      .catch(() => {})
   }, [])
 
   function exportCsv() {

@@ -84,6 +84,7 @@ urlpatterns = [
     path("api/audit-logs/", AuditLogView.as_view(), name="audit-logs"),
     path("api/cashbook/", CashbookView.as_view(), name="cashbook"),
     path("api/profitability/", ProfitabilityView.as_view(), name="profitability"),
+    path("api/profitability/<int:booking_id>/", ProfitabilityView.as_view(), name="profitability-detail"),
     path("api/reports/", ReportView.as_view(), name="reports"),
     path("api/", include(router.urls)),
 ]

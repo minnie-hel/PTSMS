@@ -122,6 +122,18 @@ export type InvoiceDoc = {
     bank_branch_code: string
     bank_correspondent: string
     bank_correspondent_swift: string
+    banks?: {
+      currency_code: string
+      account_name: string
+      account_number: string
+      iban: string
+      swift: string
+      bank_name: string
+      branch: string
+      branch_code: string
+      correspondent: string
+      correspondent_swift: string
+    }[]
     invoice_terms: string
     invoice_footer: string
   }
@@ -213,21 +225,31 @@ export function InvoiceDocument({ doc }: { doc: InvoiceDoc }) {
 
       <section className="inv-bank">
         <h2>Bank Details</h2>
-        <dl className="inv-bank-grid">
-          <div><dt>Account Name</dt><dd>{doc.company.bank_account_name}</dd></div>
-          <div><dt>Account Number</dt><dd>{doc.company.bank_account_number}</dd></div>
-          <div><dt>IBAN</dt><dd>{doc.company.bank_iban}</dd></div>
-          <div><dt>SWIFT Code</dt><dd>{doc.company.bank_swift}</dd></div>
-          <div><dt>Bank</dt><dd>{doc.company.bank_name}</dd></div>
-          <div><dt>Branch Code</dt><dd>{doc.company.bank_branch_code}</dd></div>
-          <div><dt>Branch</dt><dd>{doc.company.bank_branch}</dd></div>
-          {doc.company.bank_correspondent ? (
-            <div><dt>USD Corresponding Bank</dt><dd>{doc.company.bank_correspondent}</dd></div>
-          ) : null}
-          {doc.company.bank_correspondent_swift ? (
-            <div><dt>SWIFT Code</dt><dd>{doc.company.bank_correspondent_swift}</dd></div>
-          ) : null}
-        </dl>
+        {(doc.company.banks?.length ? doc.company.banks : [{
+          currency_code: "",
+          account_name: doc.company.bank_account_name,
+          account_number: doc.company.bank_account_number,
+          iban: doc.company.bank_iban,
+          swift: doc.company.bank_swift,
+          bank_name: doc.company.bank_name,
+          branch: doc.company.bank_branch,
+          branch_code: doc.company.bank_branch_code,
+          correspondent: doc.company.bank_correspondent,
+          correspondent_swift: doc.company.bank_correspondent_swift,
+        }]).map((bank, index) => (
+          <dl className="inv-bank-grid" key={`${bank.account_number}-${index}`}>
+            {bank.currency_code ? <div><dt>Currency</dt><dd>{bank.currency_code}</dd></div> : null}
+            <div><dt>Account Name</dt><dd>{bank.account_name}</dd></div>
+            <div><dt>Account Number</dt><dd>{bank.account_number}</dd></div>
+            <div><dt>IBAN</dt><dd>{bank.iban}</dd></div>
+            <div><dt>SWIFT Code</dt><dd>{bank.swift}</dd></div>
+            <div><dt>Bank</dt><dd>{bank.bank_name}</dd></div>
+            <div><dt>Branch Code</dt><dd>{bank.branch_code}</dd></div>
+            <div><dt>Branch</dt><dd>{bank.branch}</dd></div>
+            {bank.correspondent ? <div><dt>Corresponding Bank</dt><dd>{bank.correspondent}</dd></div> : null}
+            {bank.correspondent_swift ? <div><dt>SWIFT Code</dt><dd>{bank.correspondent_swift}</dd></div> : null}
+          </dl>
+        ))}
       </section>
 
       {terms.length ? (

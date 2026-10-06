@@ -2,6 +2,7 @@ from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db.models import Count, Sum
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -21,7 +22,15 @@ from finance.serializers import (
     VendorPaymentSerializer,
 )
 from finance.notifications import desk_notifications
-from finance.services import booking_profit, cashbook, client_payment_summary, invoice_amounts, invoice_effective_status
+from finance.services import (
+    booking_profit,
+    cashbook,
+    client_payment_summary,
+    invoice_amounts,
+    invoice_effective_status,
+    profitability_detail,
+    profitability_summary,
+)
 
 
 def money_amount_str(value: Decimal) -> str:
@@ -149,7 +158,7 @@ class VendorPaymentViewSet(AuditMixin, viewsets.ModelViewSet):
     write_permission = "costs.manage"
     filterset_fields = ["accommodation", "currency"]
     search_fields = ["reference", "accommodation__booking__reference", "accommodation__vendor__name", "accommodation__hotel__name"]
-    http_method_names = ["get", "post", "delete", "head", "options"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         return VendorPayment.objects.select_related(
@@ -182,6 +191,12 @@ class VendorPaymentViewSet(AuditMixin, viewsets.ModelViewSet):
                     "cost_currency_id": stay.cost_currency_id,
                     "cost_currency_code": stay.cost_currency.code if stay.cost_currency_id else "",
                     "vendor_payment_status": stay_payment_status(stay),
+                    "bank_account_name": stay.vendor.bank_account_name,
+                    "bank_account_number": stay.vendor.bank_account_number,
+                    "bank_name": stay.vendor.bank_name,
+                    "bank_branch": stay.vendor.bank_branch,
+                    "bank_swift": stay.vendor.bank_swift,
+                    "bank_iban": stay.vendor.bank_iban,
                 }
             )
         return Response(rows)
@@ -217,22 +232,24 @@ class ProfitabilityView(APIView):
     permission_classes = [HasCode]
     read_permission = "profitability.view"
 
-    def get(self, request):
+    def get(self, request, booking_id=None):
+        if booking_id is not None:
+            booking = get_object_or_404(
+                Booking.objects.select_related("currency", "client").prefetch_related(
+                    "accommodations__cost_currency",
+                    "accommodations__hotel",
+                    "expenses__currency",
+                    "expenses__category",
+                ),
+                pk=booking_id,
+            )
+            return Response(decimal_to_json(profitability_detail(booking)))
         rows = []
         bookings = Booking.objects.select_related("currency", "client").prefetch_related(
-            "accommodations__cost_currency", "accommodations__vendor_payments", "expenses__currency"
+            "accommodations__cost_currency", "expenses__currency"
         )
-        for booking in bookings:
-            profit = booking_profit(booking)
-            rows.append(
-                {
-                    "id": booking.id,
-                    "reference": booking.reference,
-                    "client": booking.client.full_name,
-                    "overall_status": booking.overall_status,
-                    **profit,
-                }
-            )
+        for booking in bookings.order_by("-start_date", "-id"):
+            rows.append(profitability_summary(booking))
         return Response(decimal_to_json(rows))
 
 

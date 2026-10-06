@@ -193,7 +193,7 @@ function RoleEditor({
         setCatalog(data)
         setSelected(normalize(role?.permission_codes || [], data))
       })
-      .catch((err: Error) => setError(err.message))
+      .catch(() => {})
   }, [role])
 
   const current = catalog?.modules[tab]
@@ -240,8 +240,8 @@ function RoleEditor({
       else await api("/api/roles/", { method: "POST", body })
       toast.success(role ? "Role updated successfully" : "Role created successfully")
       onSaved()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the role")
+    } catch {
+      // toasted
     } finally {
       setBusy(false)
     }

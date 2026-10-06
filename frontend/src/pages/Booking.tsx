@@ -5,7 +5,6 @@ import { useAuth } from "../auth"
 import { Badge, Banner, Field, money, PageTitle } from "../ui"
 import { EmptyRow, ListToolbar, RowActions, useListScreen, type ListFilterField } from "../lists"
 import { BOOKING_STATUS_TABS, monthFilterField } from "../listTabs"
-import { ProcessFlow, type ProcessStep } from "../workflow"
 import { useToast } from "../toast"
 
 type VendorOption = { id: number; name: string; properties: { id: number; name: string }[] }
@@ -54,14 +53,8 @@ type Booking = {
   assigned_to: number | null
   accommodations: Stay[]
   client_payment_status: string
-  vendor_payment_status: string
   amount_paid: string
   balance: string
-  profit: null | {
-    fee: { currency: string; amount: string }
-    gross_profit: { currency: string; amount: string }
-    unconverted_costs: { currency: string; amount: string }[]
-  }
   quotation_id: number | null
   itinerary_id: number | null
   invoice_id: number | null
@@ -105,44 +98,6 @@ function safariDays(start: string, end: string) {
   const to = new Date(end)
   const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1
   return days > 0 ? days : 0
-}
-
-function bookingProcessSteps(record: Booking | null, leadId: string, isNew: boolean): ProcessStep[] {
-  const lead = leadId || (record?.lead ? String(record.lead) : "")
-  const hasFile = Boolean(record)
-  return [
-    { id: "lead", label: "Lead", to: lead ? `/leads/${lead}` : undefined, done: Boolean(lead), current: isNew && Boolean(lead) },
-    {
-      id: "client",
-      label: "Client",
-      to: record ? `/clients/${record.client}` : undefined,
-      done: Boolean(record?.client || lead),
-      current: false,
-    },
-    { id: "booking", label: "Booking file", done: hasFile, current: hasFile && !record?.quotation_id },
-    {
-      id: "quotation",
-      label: "Quotation",
-      to: record?.quotation_id ? `/quotations/${record.quotation_id}` : undefined,
-      done: Boolean(record?.quotation_id),
-      current: Boolean(record?.quotation_id) && !record?.itinerary_id,
-    },
-    {
-      id: "itinerary",
-      label: "Itinerary",
-      to: record?.itinerary_id ? `/itineraries/${record.itinerary_id}` : undefined,
-      done: Boolean(record?.itinerary_id),
-      current: Boolean(record?.itinerary_id) && !record?.invoice_id,
-    },
-    {
-      id: "invoice",
-      label: "Invoice & payment",
-      to: record?.invoice_id ? `/invoices/${record.invoice_id}` : undefined,
-      done: Boolean(record?.invoice_id),
-      current: Boolean(record?.invoice_id),
-    },
-    { id: "operations", label: "Operations", to: record ? "/operations" : undefined, done: record?.overall_status === "completed", current: false },
-  ]
 }
 
 function blankStay(): Stay {
@@ -194,7 +149,6 @@ export function BookingsPage({ listPreset }: { listPreset?: "upcoming" | "in_pro
     <>
       <PageTitle
         title={listPreset === "upcoming" ? "Upcoming safaris" : listPreset === "in_progress" ? "Safaris in progress" : listPreset === "completed" ? "Completed safaris" : "Bookings"}
-        lede="Each safari file keeps the fee, the hotels, and both payment statuses."
       />
       <Banner>{error}</Banner>
       <ListToolbar
@@ -246,14 +200,13 @@ export function BookingsPage({ listPreset }: { listPreset?: "upcoming" | "in_pro
 export function BookingPage() {
   const { id } = useParams()
   const [params] = useSearchParams()
-  const isNew = id === "new"
+  const isNew = !id || id === "new"
   const { can } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
   const [error, setError] = useState("")
   const [record, setRecord] = useState<Booking | null>(null)
   const [options, setOptions] = useState<{ currencies: Option[]; destinations: Option[]; types: Option[]; staff: Option[]; clients: (Option & { full_name?: string; country?: string })[]; vendors: VendorOption[] }>({ currencies: [], destinations: [], types: [], staff: [], clients: [], vendors: [] })
-  const [catalogError, setCatalogError] = useState("")
   const [form, setForm] = useState({
     booking_date: today(),
     client: params.get("client") || "",
@@ -274,8 +227,6 @@ export function BookingPage() {
   const [stays, setStays] = useState<Stay[]>([])
   const [travellers, setTravellers] = useState<Traveller[]>([])
   const [quote, setQuote] = useState({ total_amount: "", validity_date: "", notes: "", terms: "" })
-  const [payment, setPayment] = useState({ paid_on: today(), amount: "", currency: "", amount_applied: "", payment_method: "", reference: "" })
-  const [vendorPay, setVendorPay] = useState({ accommodation: "", paid_on: today(), amount: "", payment_method: "", reference: "" })
   const [leadPreview, setLeadPreview] = useState<{ full_name: string; country: string } | null>(null)
 
   useEffect(() => {
@@ -288,8 +239,7 @@ export function BookingPage() {
       apiList<VendorOption>("/api/vendors/?for_stays=1&status=active"),
     ]).then(([currencies, destinations, types, staff, clients, vendors]) => {
       setOptions({ currencies, destinations, types, staff, clients, vendors })
-      setCatalogError("")
-    }).catch((err: Error) => setCatalogError(err.message))
+    }).catch(() => {})
   }, [])
 
   function loadBooking(bookingId: string) {
@@ -326,12 +276,12 @@ export function BookingPage() {
         cost_currency: stay.cost_currency || "",
       })))
       setQuote((current) => ({ ...current, total_amount: data.total_amount }))
-      setPayment((current) => ({ ...current, currency: String(data.currency) }))
-    }).catch((err: Error) => setError(err.message))
+    }).catch(() => {})
   }
 
   useEffect(() => {
-    if (!isNew && id) loadBooking(id)
+    if (isNew || !id) return
+    loadBooking(id)
   }, [id, isNew])
 
   useEffect(() => {
@@ -433,8 +383,8 @@ export function BookingPage() {
       })
       toast.success(isNew ? "Booking created successfully" : "Booking updated successfully")
       navigate("/bookings")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the booking")
+    } catch {
+      // API errors are shown as toasts.
     }
   }
 
@@ -442,9 +392,9 @@ export function BookingPage() {
     setError("")
     try {
       await api(path, { method: "POST", body: JSON.stringify(body || {}) })
-      if (id) loadBooking(id)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "That step failed")
+      if (!isNew && id) loadBooking(id)
+    } catch {
+      // API errors are shown as toasts.
     }
   }
 
@@ -453,28 +403,27 @@ export function BookingPage() {
   const displayClientName = record?.client_name || leadPreview?.full_name || selectedClient?.full_name || (form.lead ? "Created from lead on save" : "")
   const displayCountry = record?.client_country || leadPreview?.country || selectedClient?.country || ""
   const displaySafariDays = record?.safari_days ?? safariDays(form.start_date, form.end_date)
-  const processSteps = bookingProcessSteps(record, form.lead || params.get("lead") || "", isNew)
 
   return (
     <form onSubmit={save}>
       <PageTitle
         title={record ? record.reference : "New booking"}
-        lede={record ? `${record.client_name} · ${record.client_country || "Country on the client"} · ${record.safari_days} days` : "Opened from a lead, or from a client who is already on file."}
         backTo="/bookings"
         backLabel="Bookings"
       />
       <Banner>{error}</Banner>
-      <Banner>{catalogError}</Banner>
-      {!catalogError && options.vendors.length === 0 ? (
+      {options.vendors.length === 0 ? (
         <p className="note">No vendors loaded. Add vendors under Operations → Vendors.</p>
       ) : null}
-      <ProcessFlow title="Connected process (Lead → booking → quotation → invoice → operations)" steps={processSteps} />
       {record ? (
         <div className="stats">
-          <div className="stat"><b>{money(record.total_amount, record.currency_code)}</b><span>Fee</span></div>
-          <div className="stat"><b>{money(record.amount_paid, record.currency_code)}</b><span>Applied from the client</span></div>
-          <div className="stat"><b>{money(record.balance, record.currency_code)}</b><span>Balance</span></div>
-          <div className="stat"><Badge value={record.client_payment_status} /><div><Badge value={record.vendor_payment_status} /></div><span>Client, then hotels</span></div>
+          <div className="stat"><b>{money(record.total_amount, record.currency_code)}</b><span>Selling price</span></div>
+          <div className="stat"><b>{displaySafariDays}</b><span>Safari days</span></div>
+          {/* {record.invoice_id ? (
+            <div className="stat"><Link to={`/invoices/${record.invoice_id}`}>Open invoice</Link><span>Client payments in Finance</span></div>
+          ) : (
+            <div className="stat"><span className="muted">No invoice yet</span><span>Create via quotation flow</span></div>
+          )} */}
         </div>
       ) : null}
       <div className="card">
@@ -530,7 +479,7 @@ export function BookingPage() {
             </select>
           </Field>
         </div>
-        <h3 className="form-section-title">Fees & payment status</h3>
+        <h3 className="form-section-title">Selling price</h3>
         <div className="form-grid">
           <Field label="Total amount (selling price)"><input value={form.total_amount} onChange={(event) => setForm({ ...form, total_amount: event.target.value })} required /></Field>
           <Field label="Currency">
@@ -539,14 +488,6 @@ export function BookingPage() {
               {options.currencies.map((item) => <option key={item.id} value={item.id}>{item.code}</option>)}
             </select>
           </Field>
-          {record ? (
-            <>
-              <Field label="Client payment status"><div className="readonly-field"><Badge value={record.client_payment_status} /></div></Field>
-              <Field label="Vendor payment status (hotels)"><div className="readonly-field"><Badge value={record.vendor_payment_status} /></div></Field>
-            </>
-          ) : (
-            <Field label="Payment status" wide><p className="muted" style={{ margin: 0 }}>Client and vendor payment status are calculated after you save the booking, add an invoice, and record payments.</p></Field>
-          )}
         </div>
         <h3 className="form-section-title">Status</h3>
         <div className="form-grid">
@@ -648,61 +589,8 @@ export function BookingPage() {
       </div>
 
       {record ? (
-        <div className="grid-2" style={{ marginTop: 14 }}>
-          <DocumentPanel
-            record={record}
-            can={can}
-            quote={quote}
-            setQuote={setQuote}
-            payment={payment}
-            setPayment={setPayment}
-            methodsPath="/api/payment-methods/"
-            run={run}
-          />
-          {can("costs.create") ? (
-            <div className="card">
-              <h2>Pay a hotel</h2>
-              <p className="muted">The company pays the vendor after the client has paid. This can be the other currency.</p>
-              <div className="form-grid">
-                <Field label="Hotel / lodge on this booking" wide>
-                  <select
-                    className="select-full"
-                    value={vendorPay.accommodation}
-                    onChange={(event) => setVendorPay({ ...vendorPay, accommodation: event.target.value })}
-                  >
-                    <option value="">{record.accommodations.length ? "Choose lodge and dates" : "Add hotels & lodges above and save the booking first"}</option>
-                    {record.accommodations.filter((stay) => stay.id).map((stay) => (
-                      <option key={stay.id} value={stay.id}>{stay.vendor_name}{stay.property_name ? ` · ${stay.property_name}` : ""} · {stay.check_in} – {stay.check_out}</option>
-                    ))}
-                  </select>
-                </Field>
-                <p className="wide muted">Vendor payment status on booking: <Badge value={record.vendor_payment_status} /></p>
-                <Field label="Date"><input type="date" value={vendorPay.paid_on} onChange={(event) => setVendorPay({ ...vendorPay, paid_on: event.target.value })} /></Field>
-                <Field label={`Amount paid (${record.currency_code} or stay cost currency)`}><input type="number" step="any" value={vendorPay.amount} onChange={(event) => setVendorPay({ ...vendorPay, amount: event.target.value })} /></Field>
-                <Field label="Reference"><input value={vendorPay.reference} onChange={(event) => setVendorPay({ ...vendorPay, reference: event.target.value })} /></Field>
-              </div>
-              <button
-                type="button"
-                onClick={() => run("/api/vendor-payments/", {
-                  accommodation: Number(vendorPay.accommodation),
-                  paid_on: vendorPay.paid_on,
-                  amount: vendorPay.amount,
-                  payment_method: emptyToNull(vendorPay.payment_method),
-                  reference: vendorPay.reference,
-                })}
-              >
-                Record hotel payment
-              </button>
-            </div>
-          ) : <div />}
-          {record.profit ? (
-            <div className="card">
-              <h2>Profit</h2>
-              <p>Fee {money(record.profit.fee.amount, record.profit.fee.currency)}</p>
-              <p>Gross profit {money(record.profit.gross_profit.amount, record.profit.gross_profit.currency)}</p>
-              {record.profit.unconverted_costs.length ? <p>Also spent, not converted: {record.profit.unconverted_costs.map((item) => money(item.amount, item.currency)).join(" · ")}</p> : null}
-            </div>
-          ) : null}
+        <div style={{ marginTop: 14 }}>
+          <DocumentPanel record={record} can={can} quote={quote} setQuote={setQuote} run={run} />
         </div>
       ) : null}
       {can(isNew ? "bookings.create" : "bookings.edit") ? (
@@ -716,21 +604,14 @@ export function BookingPage() {
 }
 
 function DocumentPanel({
-  record, can, quote, setQuote, payment, setPayment, methodsPath, run,
+  record, can, quote, setQuote, run,
 }: {
   record: Booking
   can: (code: string) => boolean
   quote: { total_amount: string; validity_date: string; notes: string; terms: string }
   setQuote: (value: { total_amount: string; validity_date: string; notes: string; terms: string }) => void
-  payment: { paid_on: string; amount: string; currency: string; amount_applied: string; payment_method: string; reference: string }
-  setPayment: (value: { paid_on: string; amount: string; currency: string; amount_applied: string; payment_method: string; reference: string }) => void
-  methodsPath: string
   run: (path: string, body?: unknown) => Promise<void>
 }) {
-  const [methods, setMethods] = useState<Option[]>([])
-  useEffect(() => {
-    apiList<Option>(methodsPath).then(setMethods)
-  }, [methodsPath])
   return (
     <div className="card">
       <h2>Quotation, itinerary, invoice</h2>
@@ -775,26 +656,10 @@ function DocumentPanel({
           {can("invoices.edit") ? <button type="button" className="button" style={{ marginLeft: 8 }} onClick={() => run(`/api/invoices/${record.invoice_id}/send/`)}>Mark invoice sent</button> : null}
         </p>
       ) : null}
-      {record.invoice_id && can("payments.create") ? (
-        <div className="form-grid" style={{ marginTop: 12 }}>
-          <p className="wide muted">Status on this booking: <Badge value={record.client_payment_status} /> · Balance {money(record.balance, record.currency_code)}</p>
-          <Field label="Payment date"><input type="date" value={payment.paid_on} onChange={(event) => setPayment({ ...payment, paid_on: event.target.value })} /></Field>
-          <Field label={`Amount paid (${record.currency_code})`}><input type="number" step="any" value={payment.amount} onChange={(event) => setPayment({ ...payment, amount: event.target.value })} /></Field>
-          <Field label="Method">
-            <select value={payment.payment_method} onChange={(event) => setPayment({ ...payment, payment_method: event.target.value })}>
-              <option value="">Not set</option>
-              {methods.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </Field>
-          <Field label="Reference"><input value={payment.reference} onChange={(event) => setPayment({ ...payment, reference: event.target.value })} /></Field>
-          <button type="button" onClick={() => run("/api/payments/", {
-            invoice: record.invoice_id,
-            paid_on: payment.paid_on,
-            amount: payment.amount,
-            payment_method: emptyToNull(payment.payment_method),
-            reference: payment.reference,
-          })}>Record client payment</button>
-        </div>
+      {record.invoice_id ? (
+        <p className="muted" style={{ marginTop: 12 }}>
+          <Link to="/payments">Record client payments</Link> in Finance after the invoice is sent.
+        </p>
       ) : null}
     </div>
   )

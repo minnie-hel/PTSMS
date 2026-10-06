@@ -79,6 +79,51 @@ def default_line_description(booking) -> str:
     return ". ".join(item for item in parts if item)
 
 
+def _bank_row(bank):
+    return {
+        "currency_code": bank.currency.code if getattr(bank, "currency_id", None) else "",
+        "account_name": bank.account_name,
+        "account_number": bank.account_number,
+        "iban": bank.iban or "N/A",
+        "swift": bank.swift,
+        "bank_name": bank.bank_name,
+        "branch": bank.branch,
+        "branch_code": bank.branch_code,
+        "correspondent": bank.correspondent,
+        "correspondent_swift": bank.correspondent_swift,
+    }
+
+
+def _legacy_bank_row(company):
+    return {
+        "currency_code": "",
+        "account_name": company.bank_account_name or company.name,
+        "account_number": company.bank_account_number,
+        "iban": company.bank_iban or "N/A",
+        "swift": company.bank_swift,
+        "bank_name": company.bank_name,
+        "branch": company.bank_branch,
+        "branch_code": company.bank_branch_code,
+        "correspondent": company.bank_correspondent,
+        "correspondent_swift": company.bank_correspondent_swift,
+    }
+
+
+def company_banks_for_invoice(company, currency=None):
+    rows = [_bank_row(bank) for bank in company.banks.select_related("currency").all()]
+    if not rows:
+        if company.bank_account_number or company.bank_name or company.bank_account_name:
+            return [_legacy_bank_row(company)]
+        return []
+    if currency:
+        code = currency.code
+        matching = [row for row in rows if row["currency_code"] == code]
+        if matching:
+            others = [row for row in rows if row["currency_code"] != code]
+            return matching + others
+    return rows
+
+
 def invoice_document(invoice, request=None) -> dict:
     booking = invoice.booking
     client = invoice.client
@@ -108,6 +153,9 @@ def invoice_document(invoice, request=None) -> dict:
     logo = variants.get("logo_wide_url") or ""
     if not logo and company.logo:
         logo = browser_media_url(company.logo.url)
+
+    banks = company_banks_for_invoice(company, invoice.currency)
+    primary = banks[0] if banks else None
 
     status = invoice_effective_status(invoice)
     paid_label = "Paid" if status == "paid" else "Partially paid" if status == "partially_paid" else ""
@@ -146,15 +194,16 @@ def invoice_document(invoice, request=None) -> dict:
             "address": company.address,
             "tin_number": company.tin_number,
             "logo_url": logo,
-            "bank_account_name": company.bank_account_name or company.name,
-            "bank_account_number": company.bank_account_number,
-            "bank_iban": company.bank_iban or "N/A",
-            "bank_swift": company.bank_swift,
-            "bank_name": company.bank_name,
-            "bank_branch": company.bank_branch,
-            "bank_branch_code": company.bank_branch_code,
-            "bank_correspondent": company.bank_correspondent,
-            "bank_correspondent_swift": company.bank_correspondent_swift,
+            "banks": banks,
+            "bank_account_name": primary["account_name"] if primary else (company.bank_account_name or company.name),
+            "bank_account_number": primary["account_number"] if primary else company.bank_account_number,
+            "bank_iban": primary["iban"] if primary else (company.bank_iban or "N/A"),
+            "bank_swift": primary["swift"] if primary else company.bank_swift,
+            "bank_name": primary["bank_name"] if primary else company.bank_name,
+            "bank_branch": primary["branch"] if primary else company.bank_branch,
+            "bank_branch_code": primary["branch_code"] if primary else company.bank_branch_code,
+            "bank_correspondent": primary["correspondent"] if primary else company.bank_correspondent,
+            "bank_correspondent_swift": primary["correspondent_swift"] if primary else company.bank_correspondent_swift,
             "invoice_terms": company.invoice_terms,
             "invoice_footer": company.invoice_footer,
         },

@@ -26,7 +26,7 @@ function useChoices(path: string, label: (row: Row) => string, enabled = true) {
       .then(setRows)
       .catch((err: Error) => {
         setRows([])
-        setLoadError(err.message)
+        setLoadError("")
       })
       .finally(() => setLoading(false))
   }, [path, enabled])
@@ -37,7 +37,7 @@ function useChoices(path: string, label: (row: Row) => string, enabled = true) {
 function invoiceChoiceLabel(row: Row) {
   const status = String(row.status)
   const hint = status === "draft" ? " · send before paying" : ""
-  return `${String(row.number)} · ${String(row.client_name)} · balance ${money(row.balance as string, String(row.currency_code))}${hint}`
+  return `${String(row.booking_reference)} · ${String(row.client_name)} · ${String(row.number)} · outstanding ${money(row.balance as string, String(row.currency_code))}${hint}`
 }
 
 function payableInvoice(row: Row) {
@@ -165,7 +165,11 @@ export function QuotationDetailPage() {
   function load() {
     api<Row>(`/api/quotations/${id}/`).then((quote) => {
       setRow(quote)
-      api<Row>(`/api/bookings/${quote.booking}/`).then(setBooking).catch(() => setBooking(null))
+      if (quote.booking) {
+        api<Row>(`/api/bookings/${quote.booking}/`).then(setBooking).catch(() => setBooking(null))
+      } else {
+        setBooking(null)
+      }
     })
   }
   useEffect(() => { load() }, [id])
@@ -176,8 +180,8 @@ export function QuotationDetailPage() {
     try {
       await api(path, { method: "POST", body: "{}" })
       load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "That step failed")
+    } catch {
+      // toasted
     } finally {
       setBusy(false)
     }
@@ -193,8 +197,8 @@ export function QuotationDetailPage() {
         body: JSON.stringify({ booking: row.booking, notes: "Prepared from the accepted quotation." }),
       })
       navigate(`/itineraries/${itinerary.id}`)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the itinerary")
+    } catch {
+      // toasted
       setBusy(false)
     }
   }
@@ -342,7 +346,11 @@ export function ItineraryDetailPage() {
   function load() {
     api<Row>(`/api/itineraries/${id}/`).then((itinerary) => {
       setRow(itinerary)
-      api<Row>(`/api/bookings/${itinerary.booking}/`).then(setBooking).catch(() => setBooking(null))
+      if (itinerary.booking) {
+        api<Row>(`/api/bookings/${itinerary.booking}/`).then(setBooking).catch(() => setBooking(null))
+      } else {
+        setBooking(null)
+      }
     })
   }
   useEffect(() => { load() }, [id])
@@ -353,8 +361,8 @@ export function ItineraryDetailPage() {
     try {
       await api(`/api/itineraries/${id}/send/`, { method: "POST", body: "{}" })
       load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update the itinerary")
+    } catch {
+      // toasted
     } finally {
       setBusy(false)
     }
@@ -374,8 +382,8 @@ export function ItineraryDetailPage() {
         }),
       })
       navigate(`/invoices/${invoice.id}`)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the invoice")
+    } catch {
+      // toasted
       setBusy(false)
     }
   }
@@ -452,7 +460,7 @@ export function InvoicesPage() {
 
   return (
     <>
-      <PageTitle title="Invoices" lede="Issued after the itinerary. No VAT." />
+      <PageTitle title="Invoices"/>
       <Banner>{error}</Banner>
       <ListToolbar
         statusTabs={INVOICE_STATUS_TABS}
@@ -566,7 +574,7 @@ export function InvoiceDetailPage() {
           contact_person: String(data.contact_person || ""),
         })
       })
-      .catch((err: Error) => setError(err.message))
+      .catch(() => {})
   }
   useEffect(() => { load() }, [id])
 
@@ -593,8 +601,8 @@ export function InvoiceDetailPage() {
       })
       toast.success("Invoice updated successfully")
       navigate("/invoices")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save")
+    } catch {
+      // toasted
     } finally {
       setBusy(false)
     }
@@ -681,6 +689,12 @@ function ClientPaymentModal({
     ? String(payment?.currency_code || "")
     : picked ? String(picked.currency_code) : ""
 
+  useEffect(() => {
+    if (editing) return
+    if (picked) setAmount(String(picked.balance ?? ""))
+    else setAmount("")
+  }, [invoiceId, editing])
+
   async function submit(event: FormEvent) {
     event.preventDefault()
     setError("")
@@ -704,8 +718,8 @@ function ClientPaymentModal({
         toast.success("Payment recorded successfully")
       }
       onSaved()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : editing ? "Could not update the payment" : "Could not record the payment")
+    } catch {
+      // API errors are shown as toasts.
     } finally {
       setBusy(false)
     }
@@ -725,9 +739,9 @@ function ClientPaymentModal({
             </div>
           </Field>
         ) : (
-          <Field label="Invoice" wide>
+          <Field label="Booking / invoice" wide>
             <select className="select-full" value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} required>
-              <option value="">{loadingInvoices ? "Loading invoices…" : invoiceChoices.length ? "Choose invoice" : "No invoices with balance"}</option>
+              <option value="">{loadingInvoices ? "Loading…" : invoiceChoices.length ? "Choose booking invoice" : "No invoices with balance"}</option>
               {invoiceChoices.map((option) => (
                 <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
               ))}
@@ -736,10 +750,12 @@ function ClientPaymentModal({
         )}
         {!editing && picked ? (
           <div className="wide readonly-field">
-            <strong>Client payment status now:</strong>{" "}
-            <Badge value={String(picked.client_payment_status)} label={CLIENT_PAY_LABELS[String(picked.client_payment_status)] || String(picked.client_payment_status)} />
-            {" · "}
-            Outstanding {money(picked.balance as string, String(picked.currency_code))}
+            <div><strong>{String(picked.client_name)}</strong> · {String(picked.booking_reference)}</div>
+            <div>Invoice {String(picked.number)} · Selling price {money(picked.total_amount as string, String(picked.currency_code))}</div>
+            <div>
+              Status: <Badge value={String(picked.client_payment_status)} label={CLIENT_PAY_LABELS[String(picked.client_payment_status)] || String(picked.client_payment_status)} />
+              {" · "}Outstanding {money(picked.balance as string, String(picked.currency_code))}
+            </div>
           </div>
         ) : null}
         <Field label="Payment date"><input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} required /></Field>
@@ -787,7 +803,7 @@ export function PaymentsPage() {
 
   return (
     <>
-      <PageTitle title="Client payments" lede="Record what the client paid toward their travel invoice. Status on the booking becomes not paid, partial paid, or fully paid." />
+      <PageTitle title="Client payments"/>
       <Banner>{error}</Banner>
       <Banner>{invoiceLoad.loadError}</Banner>
       {creating && !invoiceLoad.loading && invoiceChoices.length === 0 && !invoiceLoad.loadError ? (
@@ -878,6 +894,7 @@ const VENDOR_PAY_LABELS: Record<string, string> = {
 }
 
 function HotelPaymentModal({
+  editing,
   vendors,
   stayRows,
   methods,
@@ -888,6 +905,7 @@ function HotelPaymentModal({
   onClose,
   onSaved,
 }: {
+  editing: Row | null
   vendors: Choice[]
   stayRows: Row[]
   methods: Choice[]
@@ -899,6 +917,7 @@ function HotelPaymentModal({
   onSaved: () => void
 }) {
   const toast = useToast()
+  const isEdit = Boolean(editing)
   const [vendorId, setVendorId] = useState("")
   const [stayId, setStayId] = useState("")
   const [paidOn, setPaidOn] = useState(new Date().toISOString().slice(0, 10))
@@ -908,38 +927,60 @@ function HotelPaymentModal({
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
 
+  useEffect(() => {
+    if (!editing) return
+    setPaidOn(String(editing.paid_on || new Date().toISOString().slice(0, 10)))
+    setAmount(String(editing.amount || ""))
+    setMethod(editing.payment_method ? String(editing.payment_method) : "")
+    setReference(String(editing.reference || ""))
+    setStayId(String(editing.accommodation || ""))
+    const stay = stayRows.find((row) => String(row.id) === String(editing.accommodation))
+    setVendorId(stay ? String(stay.vendor) : "")
+  }, [editing, stayRows])
+
   const staysForVendor = useMemo(
     () => (vendorId ? stayRows.filter((row) => String(row.vendor) === vendorId) : stayRows),
     [stayRows, vendorId],
   )
   const picked = stayRows.find((row) => String(row.id) === stayId)
 
+  useEffect(() => {
+    if (isEdit) return
+    if (picked) setAmount(String(picked.amount_owed ?? ""))
+    else setAmount("")
+  }, [stayId, isEdit])
+
   async function submit(event: FormEvent) {
     event.preventDefault()
     setError("")
     setBusy(true)
     try {
-      await api("/api/vendor-payments/", {
-        method: "POST",
-        body: JSON.stringify({
-          accommodation: Number(stayId),
-          paid_on: paidOn,
-          amount,
-          payment_method: emptyToNull(method),
-          reference,
-        }),
-      })
-      toast.success("Hotel payment recorded successfully")
+      const body = {
+        paid_on: paidOn,
+        amount,
+        payment_method: emptyToNull(method),
+        reference,
+      }
+      if (isEdit && editing) {
+        await api(`/api/vendor-payments/${editing.id}/`, { method: "PATCH", body: JSON.stringify(body) })
+        toast.success("Hotel payment updated")
+      } else {
+        await api("/api/vendor-payments/", {
+          method: "POST",
+          body: JSON.stringify({ ...body, accommodation: Number(stayId) }),
+        })
+        toast.success("Hotel payment recorded successfully")
+      }
       onSaved()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not record the hotel payment")
+    } catch {
+      // toasted
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Modal title="Pay accommodation vendor" onClose={onClose}>
+    <Modal title={isEdit ? "Edit hotel payment" : "Pay accommodation vendor"} onClose={onClose}>
       <form onSubmit={submit} className="form-grid">
         <Banner>{error}</Banner>
         <Banner>{vendorLoadError}</Banner>
@@ -953,6 +994,7 @@ function HotelPaymentModal({
             value={vendorId}
             onChange={(e) => { setVendorId(e.target.value); setStayId("") }}
             required
+            disabled={isEdit}
           >
             <option value="">{loadingVendors ? "Loading…" : vendors.length ? "Choose vendor" : "No vendors — add under Operations → Vendors"}</option>
             {vendors.map((option) => (
@@ -961,7 +1003,7 @@ function HotelPaymentModal({
           </select>
         </Field>
         <Field label="Booking stay (dates)" wide>
-          <select className="select-full" value={stayId} onChange={(e) => setStayId(e.target.value)} required disabled={!vendorId && staysForVendor.length === 0}>
+          <select className="select-full" value={stayId} onChange={(e) => setStayId(e.target.value)} required disabled={isEdit || (!vendorId && staysForVendor.length === 0)}>
             <option value="">
               {loadingStays ? "Loading…" : !vendorId ? "Choose the lodge first" : staysForVendor.length ? "Choose booking dates" : "No bookings use this lodge yet — add it on a booking file"}
             </option>
@@ -974,10 +1016,24 @@ function HotelPaymentModal({
         </Field>
         {picked ? (
           <div className="wide readonly-field">
-            <strong>Vendor payment status on this stay:</strong>{" "}
-            <Badge value={String(picked.vendor_payment_status)} label={VENDOR_PAY_LABELS[String(picked.vendor_payment_status)] || String(picked.vendor_payment_status)} />
-            {" · "}
-            Agreed cost {money(picked.agreed_cost as string, String(picked.cost_currency_code || ""))}
+            <div>
+              <strong>{String(picked.vendor_name)}</strong>
+              {picked.property_name ? ` · ${String(picked.property_name)}` : ""}
+              {" · "}{String(picked.booking_reference)}
+            </div>
+            <div>
+              Status: <Badge value={String(picked.vendor_payment_status)} label={VENDOR_PAY_LABELS[String(picked.vendor_payment_status)] || String(picked.vendor_payment_status)} />
+              {" · "}Agreed {money(picked.agreed_cost as string, String(picked.cost_currency_code || ""))}
+              {" · "}Owed {money(picked.amount_owed as string, String(picked.cost_currency_code || ""))}
+            </div>
+            <div>
+              Bank {String(picked.bank_name || "—")}
+              {picked.bank_account_name ? ` · ${String(picked.bank_account_name)}` : ""}
+              {picked.bank_account_number ? ` · ${String(picked.bank_account_number)}` : ""}
+              {picked.bank_swift ? ` · SWIFT ${String(picked.bank_swift)}` : ""}
+              {picked.bank_iban ? ` · IBAN ${String(picked.bank_iban)}` : ""}
+              {picked.bank_branch ? ` · ${String(picked.bank_branch)}` : ""}
+            </div>
           </div>
         ) : null}
         <Field label="Payment date"><input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} required /></Field>
@@ -992,7 +1048,7 @@ function HotelPaymentModal({
         </Field>
         <Field label="Reference"><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Bank ref, receipt no." /></Field>
         <div className="form-footer wide">
-          <button className="primary" type="submit" disabled={busy || !stayId}>{busy ? "Saving…" : "Record hotel payment"}</button>
+          <button className="primary" type="submit" disabled={busy || (!isEdit && !stayId)}>{busy ? "Saving…" : isEdit ? "Save changes" : "Record hotel payment"}</button>
           <button type="button" className="ghost" onClick={onClose}>Cancel</button>
         </div>
       </form>
@@ -1008,6 +1064,7 @@ export function HotelPaymentsPage() {
   })
   const { rows, loading, error, load, remove } = screen
   const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState<Row | null>(null)
   const [viewing, setViewing] = useState<Row | null>(null)
   const vendors = useChoices("/api/vendors/?for_stays=1&status=active", nameLabel, true)
   const methods = useChoices("/api/payment-methods/", nameLabel, true)
@@ -1015,7 +1072,7 @@ export function HotelPaymentsPage() {
 
   return (
     <>
-      <PageTitle title="Hotel payments" lede="Pay hotels and lodges for client stays on bookings." />
+      <PageTitle title="Hotel payments" />
       <Banner>{error}</Banner>
       <Banner>{vendors.loadError}</Banner>
       <Banner>{stays.loadError}</Banner>
@@ -1035,23 +1092,31 @@ export function HotelPaymentsPage() {
       />
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Date</th><th>Hotel / lodge</th><th>Amount</th><th className="actions-col">Actions</th></tr></thead>
+          <thead><tr><th>Date</th><th>Booking</th><th>Hotel / lodge</th><th>Amount</th><th>Stay status</th><th className="actions-col">Actions</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
                 <td>{String(row.paid_on)}</td>
-                <td>{String(row.vendor_name || row.property_name)}</td>
+                <td><Link to={`/bookings/${row.booking}`}>{String(row.booking_reference)}</Link></td>
+                <td>{String(row.vendor_name || "—")}{row.property_name ? ` · ${String(row.property_name)}` : ""}</td>
                 <td>{money(row.amount as string, String(row.currency_code))}</td>
+                <td>
+                  <Badge
+                    value={String(row.stay_payment_status || "not_paid")}
+                    label={VENDOR_PAY_LABELS[String(row.stay_payment_status)] || String(row.stay_payment_status)}
+                  />
+                </td>
                 <td>
                   <RowActions
                     onView={() => setViewing(row)}
+                    onEdit={can("costs.edit") ? () => setEditing(row) : undefined}
                     onDelete={can("costs.delete") ? async () => { await remove(row.id) } : undefined}
                     deleteName={`payment to ${String(row.property_name)}`}
                   />
                 </td>
               </tr>
             ))}
-            {!loading && rows.length === 0 ? <EmptyRow colSpan={4}>No hotel payments match.</EmptyRow> : null}
+            {!loading && rows.length === 0 ? <EmptyRow colSpan={6}>No hotel payments match.</EmptyRow> : null}
           </tbody>
         </table>
       </div>
@@ -1067,12 +1132,14 @@ export function HotelPaymentsPage() {
             ["Method", String(viewing.method_name || "—")],
             ["Reference", String(viewing.reference || "—")],
             ["Notes", String(viewing.notes || "—")],
+            ["Stay payment status", <Badge value={String(viewing.stay_payment_status || "not_paid")} label={VENDOR_PAY_LABELS[String(viewing.stay_payment_status)] || String(viewing.stay_payment_status)} />],
           ]}
           onClose={() => setViewing(null)}
         />
       ) : null}
-      {creating ? (
+      {creating || editing ? (
         <HotelPaymentModal
+          editing={editing}
           vendors={vendors.choices}
           stayRows={stays.rows}
           methods={methods.choices}
@@ -1080,8 +1147,8 @@ export function HotelPaymentsPage() {
           loadingStays={stays.loading}
           vendorLoadError={vendors.loadError}
           stayLoadError={stays.loadError}
-          onClose={() => setCreating(false)}
-          onSaved={() => { setCreating(false); load() }}
+          onClose={() => { setCreating(false); setEditing(null) }}
+          onSaved={() => { setCreating(false); setEditing(null); load() }}
         />
       ) : null}
     </>
@@ -1109,7 +1176,7 @@ export function ExpensesPage() {
 
   return (
     <>
-      <PageTitle title="Expenses" lede="Costs the company covers besides the hotel payments recorded on a stay." />
+      <PageTitle title="Expenses"/>
       <Banner>{error}</Banner>
       <ListToolbar
         page={screen.page}
@@ -1233,7 +1300,7 @@ export function CashbookPage() {
   const pag = useClientPagination(filteredRows)
   return (
     <>
-      <PageTitle title="Cashbook" lede="TSH and USD each keep their own running balance. Filter by the way the money moved." />
+      <PageTitle title="Cashbook"/>
       <ListToolbar
         page={pag.page}
         pageSize={pag.pageSize}
@@ -1268,31 +1335,141 @@ export function CashbookPage() {
   )
 }
 
+type MoneyBucket = { currency: string; amount: string }
+
+function sumMoneyBuckets(rows: Row[], field: string): MoneyBucket[] {
+  const totals: Record<string, number> = {}
+  for (const row of rows) {
+    const bucket = row[field] as MoneyBucket | undefined
+    if (!bucket?.currency) continue
+    totals[bucket.currency] = (totals[bucket.currency] || 0) + Number(bucket.amount || 0)
+  }
+  return Object.entries(totals).map(([currency, amount]) => ({ currency, amount: String(amount) }))
+}
+
+function profitMarginPercent(selling: number, profit: number) {
+  if (!selling || selling <= 0) return "—"
+  return `${((profit / selling) * 100).toFixed(1)}%`
+}
+
 export function ProfitPage() {
   const [all, setAll] = useState<Row[]>([])
-  useEffect(() => { api<Row[]>("/api/profitability/").then(setAll) }, [])
+  const [detail, setDetail] = useState<Row | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState("")
+
+  useEffect(() => { api<Row[]>("/api/profitability/").then(setAll).catch(() => setAll([])) }, [])
+
   const pag = useClientPagination(all)
+  const revenue = sumMoneyBuckets(all, "selling_price")
+  const costs = sumMoneyBuckets(all, "direct_costs")
+  const gross = sumMoneyBuckets(all, "gross_profit")
+
+  async function openDetail(row: Row) {
+    setDetailLoading(true)
+    setDetailError("")
+    setDetail(null)
+    try {
+      const data = await api<Row>(`/api/profitability/${row.id}/`)
+      setDetail(data)
+    } catch {
+      // toasted
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
   return (
     <>
-      <PageTitle title="Profitability" lede="Fee minus hotel costs and expenses in the same currency." />
+      <PageTitle
+        title="Profitability"
+      />
+      <div className="stats" style={{ marginBottom: 14 }}>
+        <div className="stat"><b>{revenue.length ? revenue.map((r) => money(r.amount, r.currency)).join(" · ") : "—"}</b><span>Total selling price</span></div>
+        <div className="stat"><b>{costs.length ? costs.map((r) => money(r.amount, r.currency)).join(" · ") : "—"}</b><span>Total direct costs</span></div>
+        <div className="stat"><b>{gross.length ? gross.map((r) => money(r.amount, r.currency)).join(" · ") : "—"}</b><span>Total gross profit</span></div>
+        <div className="stat">
+          <b>
+            {revenue.length === 1 && gross.length === 1 && revenue[0].currency === gross[0].currency
+              ? profitMarginPercent(Number(revenue[0].amount), Number(gross[0].amount))
+              : "—"}
+          </b>
+          <span>Margin (single currency)</span>
+        </div>
+      </div>
       <ListToolbar page={pag.page} pageSize={pag.pageSize} total={pag.total} onPageChange={pag.setPage} />
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Booking</th><th>Gross profit</th><th className="actions-col">Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Booking</th>
+              <th>Client</th>
+              <th>Selling price</th>
+              <th>Direct costs</th>
+              <th>Gross profit</th>
+              <th className="actions-col">Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {pag.rows.map((row) => {
-              const profit = row.gross_profit as { currency: string; amount: string }
+              const selling = row.selling_price as MoneyBucket
+              const direct = row.direct_costs as MoneyBucket
+              const profit = row.gross_profit as MoneyBucket
               return (
                 <tr key={row.id}>
-                  <td><Link to={`/bookings/${row.id}`}>{String(row.reference)}</Link></td>
+                  <td><Link to={`/bookings/${row.id}`}><strong>{String(row.reference)}</strong></Link></td>
+                  <td>{String(row.client)}</td>
+                  <td>{money(selling.amount, selling.currency)}</td>
+                  <td>{money(direct.amount, direct.currency)}</td>
                   <td>{money(profit.amount, profit.currency)}</td>
-                  <td><RowActions viewTo={`/bookings/${row.id}`} /></td>
+                  <td>
+                    <RowActions onView={() => openDetail(row)} />
+                  </td>
                 </tr>
               )
             })}
+            {pag.rows.length === 0 ? <EmptyRow colSpan={6}>No bookings yet.</EmptyRow> : null}
           </tbody>
         </table>
       </div>
+      {detailLoading ? <p className="muted">Loading breakdown…</p> : null}
+      <Banner>{detailError}</Banner>
+      {detail ? (
+        <Modal title={`Profitability · ${String(detail.reference)}`} onClose={() => setDetail(null)}>
+          <dl className="detail-list">
+            <dt>Client</dt><dd>{String(detail.client)}</dd>
+            <dt>Travel dates</dt><dd>{String(detail.start_date)} – {String(detail.end_date)}</dd>
+            <dt>Selling price</dt><dd>{money((detail.selling_price as MoneyBucket).amount, (detail.selling_price as MoneyBucket).currency)}</dd>
+            <dt>Received from client</dt><dd>{money((detail.amount_received as MoneyBucket).amount, (detail.amount_received as MoneyBucket).currency)}</dd>
+            <dt>Outstanding</dt><dd>{money((detail.outstanding as MoneyBucket).amount, (detail.outstanding as MoneyBucket).currency)}</dd>
+          </dl>
+          <h3 className="form-section-title">Direct cost breakdown</h3>
+          <table className="compact-table">
+            <thead><tr><th>Category</th><th>Amount</th></tr></thead>
+            <tbody>
+              {(detail.cost_breakdown as { category: string; amount: string }[] | undefined)?.map((line, index) => (
+                <tr key={`${line.category}-${index}`}>
+                  <td>{line.category}</td>
+                  <td>{money(line.amount, (detail.selling_price as MoneyBucket).currency)}</td>
+                </tr>
+              )) || <tr><td colSpan={2}>No direct costs in the booking currency yet.</td></tr>}
+              <tr>
+                <td><strong>Total direct costs</strong></td>
+                <td><strong>{money((detail.direct_costs as MoneyBucket).amount, (detail.direct_costs as MoneyBucket).currency)}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+          <h3 className="form-section-title">Financial result</h3>
+          <p><strong>Gross profit:</strong> {money((detail.gross_profit as MoneyBucket).amount, (detail.gross_profit as MoneyBucket).currency)}</p>
+          {(detail.unconverted_costs as MoneyBucket[] | undefined)?.length ? (
+            <p className="muted">Costs in other currencies (not in gross profit): {(detail.unconverted_costs as MoneyBucket[]).map((item) => money(item.amount, item.currency)).join(" · ")}</p>
+          ) : null}
+          <div className="row" style={{ marginTop: 14 }}>
+            <Link className="button" to={`/bookings/${detail.id}`}>Open booking</Link>
+            <button type="button" className="ghost" onClick={() => setDetail(null)}>Close</button>
+          </div>
+        </Modal>
+      ) : null}
     </>
   )
 }
@@ -1313,7 +1490,7 @@ export function VendorsPage() {
 
   return (
     <>
-      <PageTitle title="Vendors" lede="Hotel and lodge suppliers. Add vendors here first; when you build a booking, choose the vendor and their lodge for each client stay." />
+      <PageTitle title="Vendors"/>
       <Banner>{error}</Banner>
       <ListToolbar
         statusTabs={VENDOR_STATUS_TABS}
@@ -1355,14 +1532,33 @@ export function VendorsPage() {
       </div>
       {editing ? (
         <RecordForm
+          formKey={editing === "new" ? "new" : String(editing.id)}
           title={editing === "new" ? "New vendor" : "Edit vendor"}
-          initial={editing === "new" ? {} : { name: editing.name as string, contact_person: editing.contact_person as string, phone: editing.phone as string, email: editing.email as string, location: editing.location as string }}
+          initial={editing === "new" ? {} : {
+            name: editing.name as string,
+            contact_person: editing.contact_person as string,
+            phone: editing.phone as string,
+            email: editing.email as string,
+            location: editing.location as string,
+            bank_account_name: editing.bank_account_name as string,
+            bank_account_number: editing.bank_account_number as string,
+            bank_name: editing.bank_name as string,
+            bank_branch: editing.bank_branch as string,
+            bank_swift: editing.bank_swift as string,
+            bank_iban: editing.bank_iban as string,
+          }}
           fields={[
             { name: "name", label: "Vendor name", required: true, wide: true },
             { name: "contact_person", label: "Contact" },
             { name: "phone", label: "Phone" },
             { name: "email", label: "Email", type: "email" },
             { name: "location", label: "Location / area" },
+            { name: "bank_name", label: "Bank name" },
+            { name: "bank_account_name", label: "Account name" },
+            { name: "bank_account_number", label: "Account number" },
+            { name: "bank_branch", label: "Branch" },
+            { name: "bank_swift", label: "SWIFT / BIC" },
+            { name: "bank_iban", label: "IBAN" },
           ]}
           onSubmit={async (values) => {
             const body: Record<string, unknown> = {
@@ -1371,6 +1567,12 @@ export function VendorsPage() {
               phone: values.phone,
               email: values.email,
               location: values.location,
+              bank_name: values.bank_name,
+              bank_account_name: values.bank_account_name,
+              bank_account_number: values.bank_account_number,
+              bank_branch: values.bank_branch,
+              bank_swift: values.bank_swift,
+              bank_iban: values.bank_iban,
             }
             if (editing === "new") {
               await api("/api/vendors/", { method: "POST", body: JSON.stringify(body) })
@@ -1391,6 +1593,12 @@ export function VendorsPage() {
             <dt>Phone</dt><dd>{String(viewing.phone || "—")}</dd>
             <dt>Email</dt><dd>{String(viewing.email || "—")}</dd>
             <dt>Location</dt><dd>{String(viewing.location || "—")}</dd>
+            <dt>Bank</dt><dd>{String(viewing.bank_name || "—")}</dd>
+            <dt>Account name</dt><dd>{String(viewing.bank_account_name || "—")}</dd>
+            <dt>Account number</dt><dd>{String(viewing.bank_account_number || "—")}</dd>
+            <dt>Branch</dt><dd>{String(viewing.bank_branch || "—")}</dd>
+            <dt>SWIFT</dt><dd>{String(viewing.bank_swift || "—")}</dd>
+            <dt>IBAN</dt><dd>{String(viewing.bank_iban || "—")}</dd>
             <dt>Status</dt><dd>{String(viewing.status || "active")}</dd>
           </dl>
           <div className="row" style={{ marginTop: 14 }}>
