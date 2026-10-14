@@ -37,7 +37,7 @@ export function DashboardPage() {
   const { user } = useAuth()
   const [data, setData] = useState<DashboardData | null>(null)
   const [currencies, setCurrencies] = useState<unknown[] | null>(null)
-  const [error, setError] = useState("")
+  const [error] = useState("")
 
   useEffect(() => {
     api<DashboardData>("/api/dashboard/")
@@ -106,14 +106,14 @@ export function FollowUpsPage() {
   const [rows, setRows] = useState<FollowUpRow[]>([])
   const [stateTab, setStateTab] = useState("")
   const [kind, setKind] = useState("")
-  const [error, setError] = useState("")
+  const [error] = useState("")
   const [form, setForm] = useState<FollowUpRow | "new" | null>(null)
   const [leadTargets, setLeadTargets] = useState<FollowUpTarget[]>([])
   const [clientTargets, setClientTargets] = useState<FollowUpTarget[]>([])
 
   function load() {
     api<FollowUpRow[]>("/api/follow-ups/")
-      .then((data) => { setRows(data); setError("") })
+      .then((data) => { setRows(data) })
       .catch(() => {})
   }
   useEffect(() => {
@@ -230,7 +230,7 @@ export function ActivitiesPage() {
   const { can } = useAuth()
   const [rows, setRows] = useState<ActivityRow[]>([])
   const [typeTab, setTypeTab] = useState("")
-  const [error, setError] = useState("")
+  const [error] = useState("")
   const [creating, setCreating] = useState(false)
   const [viewing, setViewing] = useState<ActivityRow | null>(null)
   const [leads, setLeads] = useState<LeadOption[]>([])

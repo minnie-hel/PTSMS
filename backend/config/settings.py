@@ -165,3 +165,12 @@ SIMPLE_JWT = {
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
 }
+
+EMAIL_BACKEND = os.environ.get("PTSMS_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.environ.get("PTSMS_EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("PTSMS_EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("PTSMS_EMAIL_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("PTSMS_EMAIL_PASSWORD", "")
+EMAIL_USE_TLS = _truthy("PTSMS_EMAIL_TLS", "1")
+DEFAULT_FROM_EMAIL = os.environ.get("PTSMS_FROM_EMAIL", "noreply@paultoursafari.net")
+PTSMS_PUBLIC_URL = os.environ.get("PTSMS_PUBLIC_URL", "").rstrip("/")

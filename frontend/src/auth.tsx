@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
-import { api, clearSession, type SessionUser } from "./api"
+import { api, clearSession, getAccess, setSession, type SessionUser } from "./api"
 
 type AuthValue = {
   user: SessionUser | null
   loading: boolean
   can: (code: string) => boolean
-  signIn: (email: string, password: string) => Promise<void>
+  signIn: (email: string, password: string, remember?: boolean) => Promise<void>
   signOut: () => void
   refreshUser: () => Promise<void>
 }
@@ -17,7 +17,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   async function refreshUser() {
-    if (!localStorage.getItem("ptsms_access")) {
+    if (!getAccess()) {
       setUser(null)
       return
     }
@@ -38,13 +38,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       can: (code: string) => Boolean(user && (user.is_superadmin || user.permissions.includes(code))),
-      signIn: async (email: string, password: string) => {
+      signIn: async (email: string, password: string, remember = true) => {
         const data = await api<{ access: string; refresh: string; user: SessionUser }>("/api/auth/token/", {
           method: "POST",
           body: JSON.stringify({ email, password }),
         })
-        localStorage.setItem("ptsms_access", data.access)
-        localStorage.setItem("ptsms_refresh", data.refresh)
+        setSession(data.access, data.refresh, remember)
         setUser(data.user)
       },
       signOut: () => {

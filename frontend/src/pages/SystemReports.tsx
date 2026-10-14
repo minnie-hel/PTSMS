@@ -25,7 +25,7 @@ export function SystemReportsPage() {
   const [tab, setTab] = useState<"activities" | "audit">("activities")
   const [activities, setActivities] = useState<ActivityRow[]>([])
   const [audits, setAudits] = useState<AuditRow[]>([])
-  const [error, setError] = useState("")
+  const [error] = useState("")
 
   useEffect(() => {
     apiList<ActivityRow>("/api/activities/?page_size=200")

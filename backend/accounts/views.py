@@ -8,10 +8,13 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 from accounts.models import Permission, Role
 from accounts.permissions import HasCode, RolePermission
+from accounts.password import apply_reset, set_password_for_email
 from accounts.serializers import (
     EmailTokenSerializer,
+    ForgotPasswordSerializer,
     PasswordChangeSerializer,
     PermissionSerializer,
+    ResetPasswordSerializer,
     RoleSerializer,
     UserSerializer,
     UserWriteSerializer,
@@ -52,6 +55,32 @@ class PasswordView(APIView):
         request.user.set_password(serializer.validated_data["new_password"])
         request.user.save(update_fields=["password"])
         return Response({"detail": "Password updated."})
+
+
+class ForgotPasswordView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        set_password_for_email(serializer.validated_data["email"], serializer.validated_data["new_password"])
+        return Response({"detail": "Password updated. Sign in with your new password."})
+
+
+class ResetPasswordView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        apply_reset(
+            serializer.validated_data["uid"],
+            serializer.validated_data["token"],
+            serializer.validated_data["new_password"],
+        )
+        return Response({"detail": "Password updated. Sign in with your new password."})
 
 
 class UserViewSet(AuditMixin, ProtectedDestroyMixin, viewsets.ModelViewSet):

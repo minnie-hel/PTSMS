@@ -6,11 +6,13 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from accounts.views import (
+    ForgotPasswordView,
     LoginView,
     MeView,
     PasswordView,
     PermissionCatalogView,
     PermissionViewSet,
+    ResetPasswordView,
     RoleViewSet,
     StaffView,
     UserViewSet,
@@ -74,6 +76,8 @@ urlpatterns = [
     path("api/auth/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("api/auth/me/", MeView.as_view(), name="me"),
     path("api/auth/password/", PasswordView.as_view(), name="password"),
+    path("api/auth/forgot-password/", ForgotPasswordView.as_view(), name="forgot-password"),
+    path("api/auth/reset-password/", ResetPasswordView.as_view(), name="reset-password"),
     path("api/staff/", StaffView.as_view(), name="staff"),
     path("api/permission-catalog/", PermissionCatalogView.as_view(), name="permission-catalog"),
     path("api/branding/", BrandingView.as_view(), name="branding"),

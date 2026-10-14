@@ -158,7 +158,7 @@ export function LeadDetailPage() {
   const [activities, setActivities] = useState<{ id: number; type_label: string; body: string; created_at: string }[]>([])
   const [note, setNote] = useState("")
   const [kind, setKind] = useState("note")
-  const [error, setError] = useState("")
+  const [error] = useState("")
   const [editing, setEditing] = useState(false)
 
   function load() {
@@ -269,7 +269,7 @@ function LeadForm({ initial, onClose, onSaved }: { initial?: Lead; onClose: () =
     budget: initial?.budget || "",
   })
   const [options, setOptions] = useState<{ destinations: Option[]; types: Option[]; currencies: Option[]; sources: Option[]; staff: Option[] }>({ destinations: [], types: [], currencies: [], sources: [], staff: [] })
-  const [error, setError] = useState("")
+  const [error] = useState("")
 
   useEffect(() => {
     Promise.all([
@@ -670,7 +670,7 @@ function ClientForm({ initial, onClose, onSaved }: { initial?: ClientRow; onClos
     notes: initial?.notes || "",
   })
   const [options, setOptions] = useState<{ types: { id: number; name: string }[]; sources: { id: number; name: string }[]; staff: { id: number; full_name: string }[] }>({ types: [], sources: [], staff: [] })
-  const [error, setError] = useState("")
+  const [error] = useState("")
   useEffect(() => {
     Promise.all([
       apiList<{ id: number; name: string }>("/api/client-types/"),

@@ -74,8 +74,28 @@ export type SessionUser = {
   permissions: string[]
 }
 
+const ACCESS_KEY = "ptsms_access"
+const REFRESH_KEY = "ptsms_refresh"
+
+function tokenStore(): Storage {
+  if (sessionStorage.getItem(ACCESS_KEY)) return sessionStorage
+  return localStorage
+}
+
+export function getAccess() {
+  return sessionStorage.getItem(ACCESS_KEY) || localStorage.getItem(ACCESS_KEY)
+}
+
+export function setSession(access: string, refresh: string, remember: boolean) {
+  clearSession()
+  const store = remember ? localStorage : sessionStorage
+  store.setItem(ACCESS_KEY, access)
+  store.setItem(REFRESH_KEY, refresh)
+}
+
 async function refreshAccess(): Promise<boolean> {
-  const refresh = localStorage.getItem("ptsms_refresh")
+  const store = tokenStore()
+  const refresh = store.getItem(REFRESH_KEY)
   if (!refresh) return false
   const response = await fetch("/api/auth/refresh/", {
     method: "POST",
@@ -84,13 +104,15 @@ async function refreshAccess(): Promise<boolean> {
   })
   if (!response.ok) return false
   const data = (await response.json()) as { access: string }
-  localStorage.setItem("ptsms_access", data.access)
+  store.setItem(ACCESS_KEY, data.access)
   return true
 }
 
 export function clearSession() {
-  localStorage.removeItem("ptsms_access")
-  localStorage.removeItem("ptsms_refresh")
+  localStorage.removeItem(ACCESS_KEY)
+  localStorage.removeItem(REFRESH_KEY)
+  sessionStorage.removeItem(ACCESS_KEY)
+  sessionStorage.removeItem(REFRESH_KEY)
 }
 
 export async function api<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
@@ -98,7 +120,7 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
   if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json")
   }
-  const access = localStorage.getItem("ptsms_access")
+  const access = getAccess()
   if (access) headers.set("Authorization", `Bearer ${access}`)
   const response = await fetch(path, { ...options, headers })
   if (response.status === 401 && retry && !path.includes("/auth/token")) {

@@ -24,7 +24,7 @@ function useChoices(path: string, label: (row: Row) => string, enabled = true) {
     setLoading(true)
     apiList<Row>(path)
       .then(setRows)
-      .catch((err: Error) => {
+      .catch(() => {
         setRows([])
         setLoadError("")
       })

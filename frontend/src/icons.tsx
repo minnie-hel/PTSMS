@@ -73,6 +73,14 @@ export function IconSearch() { return <SearchNormal1 size={SMALL} color="current
 export function IconFilter() { return <Filter size={SMALL} color="currentColor" /> }
 export function IconPlus() { return <Add size={SMALL} color="currentColor" /> }
 export function IconEye() { return <Eye size={SMALL} color="currentColor" /> }
+export function IconEyeOff() {
+  return (
+    <svg width={SMALL} height={SMALL} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M3 3l18 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M10.6 10.6a2.4 2.4 0 0 0 3.4 3.4M9.9 5.2A10.5 10.5 0 0 1 12 5c5 0 9.3 3.1 11 7.5a11.7 11.7 0 0 1-4.1 4.8M6.7 6.7A11.8 11.8 0 0 0 1 12.5C2.7 16.9 7 20 12 20c1.6 0 3.1-.3 4.5-.9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
 export function IconEdit() { return <Edit2 size={SMALL} color="currentColor" /> }
 export function IconTrash() { return <Trash size={SMALL} color="currentColor" /> }
 export function IconArrowRight() { return <ArrowRight3 size={SMALL} color="currentColor" /> }

@@ -2,12 +2,12 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 
 export type ThemeMode = "light" | "dark"
 
-const STORAGE_KEY = "ptsms_theme"
+const STORAGE_KEY = "ptsms_color_mode"
 
 function readInitial(): ThemeMode {
   const saved = localStorage.getItem(STORAGE_KEY)
   if (saved === "light" || saved === "dark") return saved
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+  return "light"
 }
 
 function applyTheme(mode: ThemeMode) {
@@ -27,11 +27,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applyTheme(mode)
-    localStorage.setItem(STORAGE_KEY, mode)
   }, [mode])
 
   const value = useMemo<ThemeValue>(
-    () => ({ mode, toggle: () => setMode((current) => (current === "dark" ? "light" : "dark")) }),
+    () => ({
+      mode,
+      toggle: () =>
+        setMode((current) => {
+          const next = current === "dark" ? "light" : "dark"
+          localStorage.setItem(STORAGE_KEY, next)
+          return next
+        }),
+    }),
     [mode],
   )
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>

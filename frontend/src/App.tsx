@@ -1,7 +1,7 @@
 import { Navigate, Outlet, Route, Routes } from "react-router-dom"
 import { useAuth } from "./auth"
 import { Guard, Shell } from "./ui"
-import { LoginPage } from "./pages/Login"
+import { ForgotPasswordPage, LoginPage, ResetPasswordPage } from "./pages/Login"
 import { ActivitiesPage, DashboardPage, FollowUpsPage, OperationsPage, PipelinePage } from "./pages/Home"
 import { ModuleReportsPage } from "./pages/Reports"
 import { SystemReportsPage } from "./pages/SystemReports"
@@ -28,6 +28,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password/:uid/:token" element={<ResetPasswordPage />} />
       <Route element={<Shell />}>
         <Route path="/" element={<Guard code="dashboard.view"><DashboardPage /></Guard>} />
         <Route path="/leads" element={<Guard code="leads.view"><LeadsPage /></Guard>} />

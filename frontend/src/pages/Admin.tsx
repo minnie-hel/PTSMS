@@ -34,7 +34,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageTitle title="Settings" lede="Company profile, bank details for invoices, and master lists used across CRM, bookings, and finance." />
+      <PageTitle title="Settings"/>
       <Banner>{listError}</Banner>
       <div className="perm-tabs no-print">
         {TABS.map((item) => (

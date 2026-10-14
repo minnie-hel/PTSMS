@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { clearSession } from "../api"
+import { clearSession, getAccess } from "../api"
 import { LogoImage, useCompany } from "../company"
 import { PageTitle } from "../ui"
 import { emitAppError } from "../errors"
@@ -58,7 +58,7 @@ type ReportIndex = {
 }
 
 async function fetchReport(path: string) {
-  const access = localStorage.getItem("ptsms_access")
+  const access = getAccess()
   const response = await fetch(path, {
     headers: access ? { Authorization: `Bearer ${access}` } : {},
   })
