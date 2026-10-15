@@ -3,8 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 import { api } from "../api"
 import { useAuth } from "../auth"
 import { DEFAULT_BRAND_NAME, LoginBrandLogo, useCompany } from "../company"
-import { IconEye, IconEyeOff } from "../icons"
-import { Field } from "../ui"
+import { Field, PasswordInput } from "../ui"
 import { useToast } from "../toast"
 
 function PasswordField({
@@ -24,28 +23,16 @@ function PasswordField({
   required?: boolean
   minLength?: number
 }) {
-  const [visible, setVisible] = useState(false)
   return (
     <Field label={label}>
-      <div className="password-field">
-        <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          type={visible ? "text" : "password"}
-          autoComplete={autoComplete}
-          required={required}
-          minLength={minLength}
-          placeholder={placeholder}
-        />
-        <button
-          type="button"
-          className="password-toggle"
-          onClick={() => setVisible((open) => !open)}
-          aria-label={visible ? "Hide password" : "Show password"}
-        >
-          {visible ? <IconEyeOff /> : <IconEye />}
-        </button>
-      </div>
+      <PasswordInput
+        value={value}
+        onChange={onChange}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        required={required}
+        minLength={minLength}
+      />
     </Field>
   )
 }

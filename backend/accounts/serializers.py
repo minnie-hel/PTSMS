@@ -1,4 +1,6 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -31,6 +33,15 @@ class UserSerializer(serializers.ModelSerializer):
         return obj.permission_codes()
 
 
+class MeUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["email", "full_name", "phone"]
+
+    def validate_email(self, value):
+        return User.objects.normalize_email(value)
+
+
 class UserWriteSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
@@ -41,18 +52,28 @@ class UserWriteSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         return User.objects.normalize_email(value)
 
+    def _set_password(self, user, password):
+        try:
+            validate_password(password, user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"password": list(exc.messages)}) from exc
+        user.set_password(password)
+
     def create(self, validated):
         password = validated.pop("password", None)
         if not password:
             raise serializers.ValidationError({"password": "Set a password for the new user."})
-        return User.objects.create_user(password=password, **validated)
+        user = User(**validated)
+        self._set_password(user, password)
+        user.save()
+        return user
 
     def update(self, instance, validated):
         password = validated.pop("password", None)
         for key, value in validated.items():
             setattr(instance, key, value)
         if password:
-            instance.set_password(password)
+            self._set_password(instance, password)
         instance.save()
         return instance
 

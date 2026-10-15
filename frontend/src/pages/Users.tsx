@@ -26,6 +26,7 @@ type Person = {
 
 export function UsersPage() {
   const { can, user: me } = useAuth()
+  const toast = useToast()
   const [roles, setRoles] = useState<Role[]>([])
   const [editing, setEditing] = useState<Person | "new" | null>(null)
   const [viewing, setViewing] = useState<Person | null>(null)
@@ -50,6 +51,12 @@ export function UsersPage() {
       phone: values.phone,
       role: values.role ? Number(values.role) : null,
       is_active: Boolean(values.is_active),
+    }
+    if (values.password || values.confirm_password) {
+      if (values.password !== values.confirm_password) {
+        toast.error("The two passwords do not match.")
+        throw new Error("The two passwords do not match.")
+      }
     }
     if (values.password) body.password = values.password
     if (editing === "new") await api("/api/users/", { method: "POST", body: JSON.stringify(body) })
@@ -106,7 +113,8 @@ export function UsersPage() {
       {editing ? (
         <RecordForm
           title={editing === "new" ? "New user" : "Edit user"}
-          initial={editing === "new" ? { is_active: true } : { ...editing }}
+          formKey={editing === "new" ? "new" : String(editing.id)}
+          initial={editing === "new" ? { is_active: true, password: "", confirm_password: "" } : { ...editing, password: "", confirm_password: "" }}
           fields={[
             { name: "full_name", label: "Full name", required: true },
             { name: "email", label: "Email", type: "email", required: true },
@@ -114,9 +122,19 @@ export function UsersPage() {
             { name: "role", label: "Role", type: "select", options: roleOptions, required: true, empty: "Choose a role" },
             {
               name: "password",
-              label: editing === "new" ? "Password" : "New password (leave empty to keep)",
+              label: "Password",
               type: "password",
               required: editing === "new",
+              minLength: 8,
+              placeholder: editing === "new" ? "Password" : "Type a new password to change it",
+            },
+            {
+              name: "confirm_password",
+              label: "Confirm password",
+              type: "password",
+              required: editing === "new",
+              minLength: 8,
+              placeholder: "Confirm password",
             },
             { name: "is_active", label: "Account is active", type: "checkbox" },
           ]}

@@ -13,6 +13,9 @@ import {
   IconCompass,
   IconDashboard,
   IconDocument,
+  IconEye,
+  IconEyeOff,
+  IconLogout,
   IconMoon,
   IconShield,
   IconSettings,
@@ -138,6 +141,45 @@ export function Field({
       {label}
       {children}
     </label>
+  )
+}
+
+export function PasswordInput({
+  value,
+  onChange,
+  autoComplete,
+  placeholder,
+  required,
+  minLength,
+}: {
+  value: string
+  onChange: (value: string) => void
+  autoComplete?: string
+  placeholder?: string
+  required?: boolean
+  minLength?: number
+}) {
+  const [visible, setVisible] = useState(false)
+  return (
+    <div className="password-field">
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        type={visible ? "text" : "password"}
+        autoComplete={autoComplete}
+        required={required}
+        minLength={minLength}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        className="password-toggle"
+        onClick={() => setVisible((open) => !open)}
+        aria-label={visible ? "Hide password" : "Show password"}
+      >
+        {visible ? <IconEyeOff /> : <IconEye />}
+      </button>
+    </div>
   )
 }
 
@@ -336,6 +378,7 @@ function TopBar({ collapsed, onToggleSide }: { collapsed: boolean; onToggleSide:
             <div className="topbar-panel topbar-panel-profile">
               <p className="topbar-panel-title">{user?.full_name}</p>
               <p className="muted topbar-panel-email">{user?.email}</p>
+              <Link to="/profile" onClick={() => setProfileOpen(false)}>My profile</Link>
               {can("settings.view") ? (
                 <Link to="/settings" onClick={() => setProfileOpen(false)}>Settings</Link>
               ) : null}
@@ -430,7 +473,7 @@ const LANDED_KEY = "ptsms_landed"
 const COLLAPSE_KEY = "ptsms_side_collapsed"
 
 export function Shell() {
-  const { user, can, loading } = useAuth()
+  const { user, can, loading, signOut } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "1")
@@ -488,6 +531,20 @@ export function Shell() {
             />
           ))}
         </nav>
+        <div className="side-footer">
+          <button
+            type="button"
+            className="side-logout"
+            title="Log out"
+            onClick={() => {
+              signOut()
+              navigate("/login")
+            }}
+          >
+            <span className="nav-icon"><IconLogout /></span>
+            <span className="side-logout-label">Log out</span>
+          </button>
+        </div>
       </aside>
       <div className="main">
         <TopBar collapsed={collapsed} onToggleSide={() => setCollapsed((value) => !value)} />

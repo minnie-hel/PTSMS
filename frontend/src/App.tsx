@@ -32,6 +32,7 @@ const VendorsPage = lazy(() => import("./pages/Office").then((m) => ({ default: 
 const SettingsPage = lazy(() => import("./pages/Admin").then((m) => ({ default: m.SettingsPage })))
 const RolesPage = lazy(() => import("./pages/Users").then((m) => ({ default: m.RolesPage })))
 const UsersPage = lazy(() => import("./pages/Users").then((m) => ({ default: m.UsersPage })))
+const ProfilePage = lazy(() => import("./pages/Profile").then((m) => ({ default: m.ProfilePage })))
 
 function ScreenFallback() {
   return <p className="page-loading">Loading…</p>
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/roles" element={<Guard code="roles.view"><RolesPage /></Guard>} />
           <Route path="/team" element={<Navigate to="/users" replace />} />
           <Route path="/settings" element={<Guard code="settings.view"><SettingsPage /></Guard>} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="*" element={<Missing />} />
         </Route>
       </Routes>

@@ -13,6 +13,7 @@ from accounts.password import apply_reset, set_password_for_email
 from accounts.serializers import (
     EmailTokenSerializer,
     ForgotPasswordSerializer,
+    MeUpdateSerializer,
     PasswordChangeSerializer,
     PermissionSerializer,
     ResetPasswordSerializer,
@@ -38,7 +39,7 @@ class MeView(APIView):
         return Response(UserSerializer(request.user).data)
 
     def patch(self, request):
-        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        serializer = MeUpdateSerializer(request.user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(UserSerializer(request.user).data)

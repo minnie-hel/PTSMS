@@ -7,7 +7,7 @@ function listDeleteUrl(path: string, id: number | string) {
 }
 import { Link } from "react-router-dom"
 import { api, apiList } from "./api"
-import { Field, Modal } from "./ui"
+import { Field, Modal, PasswordInput } from "./ui"
 import type { ExportFormat } from "./export"
 import { IconEdit, IconEye, IconFilter, IconPlus, IconTrash } from "./icons"
 import { useToast } from "./toast"
@@ -495,6 +495,7 @@ export type FieldDef = {
   required?: boolean
   wide?: boolean
   empty?: string
+  minLength?: number
 }
 
 /** A modal form built from a field list, used by the simple create/edit screens. */
@@ -587,6 +588,15 @@ export function RecordForm({
                     <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Nothing to choose yet. Create an invoice from the booking workflow, then return here.</p>
                   ) : null}
                 </>
+              ) : field.type === "password" ? (
+                <PasswordInput
+                  value={value}
+                  onChange={set}
+                  autoComplete="new-password"
+                  required={field.required}
+                  placeholder={field.placeholder}
+                  minLength={field.minLength}
+                />
               ) : (
                 <input
                   type={field.type || "text"}

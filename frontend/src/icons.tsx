@@ -72,6 +72,14 @@ export function IconShield() { return <ShieldTick size={NAV} color="currentColor
 export function IconSearch() { return <SearchNormal1 size={SMALL} color="currentColor" /> }
 export function IconFilter() { return <Filter size={SMALL} color="currentColor" /> }
 export function IconPlus() { return <Add size={SMALL} color="currentColor" /> }
+export function IconLogout() {
+  return (
+    <svg width={NAV} height={NAV} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M9 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
 export function IconEye() { return <Eye size={SMALL} color="currentColor" /> }
 export function IconEyeOff() {
   return (
