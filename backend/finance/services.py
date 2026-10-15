@@ -12,8 +12,18 @@ def money(value):
     return value or Decimal("0")
 
 
+def _related_sum(instance, related, field):
+    cache = getattr(instance, "_prefetched_objects_cache", None)
+    if cache is not None and related in cache:
+        total = Decimal("0")
+        for row in cache[related]:
+            total += getattr(row, field) or Decimal("0")
+        return total
+    return money(getattr(instance, related).aggregate(total=Sum(field))["total"])
+
+
 def client_payment_summary(booking):
-    paid = money(booking.payments.aggregate(total=Sum("amount_applied"))["total"])
+    paid = _related_sum(booking, "payments", "amount_applied")
     total = booking.total_amount or Decimal("0")
     balance = total - paid
     if paid <= 0:
@@ -26,9 +36,14 @@ def client_payment_summary(booking):
 
 
 def invoice_amounts(invoice):
-    paid = money(invoice.payments.aggregate(total=Sum("amount_applied"))["total"])
+    cached = getattr(invoice, "_ptsms_amounts", None)
+    if cached is not None:
+        return cached
+    paid = _related_sum(invoice, "payments", "amount_applied")
     balance = (invoice.total_amount or Decimal("0")) - paid
-    return {"paid": paid, "balance": balance if balance > 0 else Decimal("0")}
+    result = {"paid": paid, "balance": balance if balance > 0 else Decimal("0")}
+    invoice._ptsms_amounts = result
+    return result
 
 
 def invoice_effective_status(invoice):
@@ -98,7 +113,7 @@ def profitability_detail(booking):
     return summary
 
 
-def booking_profit(booking):
+def booking_profit(booking, *, include_vendor=True):
     fee_code = booking.currency.code
     hotel = {}
     other = {}
@@ -112,14 +127,16 @@ def booking_profit(booking):
     for code, amount in {**hotel, **other}.items():
         if code != fee_code and amount:
             other_currencies.append({"currency": code, "amount": amount})
-    return {
+    payload = {
         "fee": {"currency": fee_code, "amount": booking.total_amount},
         "hotel_costs": [{"currency": code, "amount": amount} for code, amount in hotel.items()],
         "other_expenses": [{"currency": code, "amount": amount} for code, amount in other.items()],
         "gross_profit": {"currency": fee_code, "amount": booking.total_amount - same},
         "unconverted_costs": other_currencies,
-        "vendor": vendor_payment_summary(booking),
     }
+    if include_vendor:
+        payload["vendor"] = vendor_payment_summary(booking)
+    return payload
 
 
 def cashbook(currency_code=None, method_id=None):

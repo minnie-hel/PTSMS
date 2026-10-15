@@ -9,7 +9,9 @@ WorkingDirectory=/srv/ptsms/backend
 EnvironmentFile=/srv/ptsms/backend/.env
 RuntimeDirectory=ptsms
 ExecStart=/srv/ptsms/backend/.venv/bin/gunicorn \
+    --worker-class gthread \
     --workers 3 \
+    --threads 4 \
     --bind unix:/run/ptsms/gunicorn.sock \
     config.wsgi:application
 Restart=on-failure

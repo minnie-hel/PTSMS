@@ -131,7 +131,7 @@ Point DNS A record at the VPS, then:
 
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d desk.example.com
+sudo certbot --nginx -d paultoursafari.space -d www.paultoursafari.space
 ```
 
 Set `PTSMS_HTTPS=1` in `.env` and restart gunicorn. Leave `PTSMS_SSL_REDIRECT=0` so nginx (not Django) handles HTTP→HTTPS.

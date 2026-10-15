@@ -39,7 +39,7 @@ def named_serializer(model):
     return type(f"{model.__name__}Serializer", (serializers.ModelSerializer,), {"Meta": meta})
 
 
-from catalog.serializers import CompanySerializer
+from catalog.serializers import CompanySerializer, PublicBrandingSerializer
 
 
 class BrandingView(APIView):
@@ -47,7 +47,7 @@ class BrandingView(APIView):
 
     def get(self, request):
         profile = CompanyProfile.load()
-        return Response(CompanySerializer(profile, context={"request": request}).data)
+        return Response(PublicBrandingSerializer(profile, context={"request": request}).data)
 
 
 class CompanyView(APIView):

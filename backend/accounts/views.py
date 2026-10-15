@@ -3,6 +3,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.db.models import Count
 from rest_framework import viewsets
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -28,6 +29,8 @@ class LoginView(TokenObtainPairView):
     permission_classes = []
     authentication_classes = []
     serializer_class = EmailTokenSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
 
 class MeView(APIView):
@@ -60,6 +63,8 @@ class PasswordView(APIView):
 class ForgotPasswordView(APIView):
     permission_classes = []
     authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
 
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)
@@ -71,6 +76,8 @@ class ForgotPasswordView(APIView):
 class ResetPasswordView(APIView):
     permission_classes = []
     authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
 
     def post(self, request):
         serializer = ResetPasswordSerializer(data=request.data)

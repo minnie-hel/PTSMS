@@ -1,9 +1,10 @@
+from django.db.models import DecimalField, F, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from bookings.models import Booking, Quotation
 from crm.models import Client, Lead
 from finance.models import Invoice
-from finance.services import invoice_effective_status
 
 
 def desk_notifications():
@@ -19,10 +20,16 @@ def desk_notifications():
         items.append(
             {"kind": "follow_up", "label": f"{client_due} client follow-up(s) due", "path": "/follow-ups"}
         )
-    overdue = 0
-    for invoice in Invoice.objects.exclude(status=Invoice.Status.CANCELLED).prefetch_related("payments"):
-        if invoice_effective_status(invoice) == "overdue":
-            overdue += 1
+    paid = Coalesce(
+        Sum("payments__amount_applied"),
+        Value(0, output_field=DecimalField(max_digits=14, decimal_places=2)),
+    )
+    overdue = (
+        Invoice.objects.exclude(status__in=[Invoice.Status.CANCELLED, Invoice.Status.DRAFT])
+        .annotate(paid=paid)
+        .filter(paid__lt=F("total_amount"), due_date__lt=today)
+        .count()
+    )
     if overdue:
         items.append({"kind": "invoice", "label": f"{overdue} overdue invoice(s)", "path": "/invoices"})
     upcoming = Booking.objects.filter(

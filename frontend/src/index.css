@@ -76,6 +76,7 @@ body {
   color: var(--ink);
   transition: background-color 0.2s ease, color 0.2s ease;
 }
+.page-loading { margin: 0; padding: 28px 24px; color: var(--muted); }
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: inherit; }
 

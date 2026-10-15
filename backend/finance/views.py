@@ -1,7 +1,8 @@
 from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 
-from django.db.models import Count, Sum
+from django.db.models import Count, DecimalField, F, Sum, Value
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets
@@ -62,9 +63,16 @@ class InvoiceViewSet(AuditMixin, ProtectedDestroyMixin, viewsets.ModelViewSet):
         return super().get_permissions()
 
     def get_queryset(self):
-        return Invoice.objects.select_related(
+        qs = Invoice.objects.select_related(
             "booking", "booking__assigned_to", "client", "currency"
-        ).prefetch_related("payments", "booking__destinations", "booking__accommodations__hotel", "booking__accommodations__vendor")
+        ).prefetch_related("payments")
+        if self.action != "list":
+            qs = qs.prefetch_related(
+                "booking__destinations",
+                "booking__accommodations__hotel",
+                "booking__accommodations__vendor",
+            )
+        return qs
 
     @action(detail=True, methods=["post"])
     def send(self, request, pk=None):
@@ -267,14 +275,10 @@ class DashboardView(APIView):
 
     def get(self, request):
         today = timezone.localdate()
-        bookings = list(
-            Booking.objects.select_related("currency", "client").prefetch_related(
-                "payments",
-                "accommodations__cost_currency",
-                "accommodations__vendor_payments",
-                "expenses__currency",
-                "invoices",
-            )
+        bookings = Booking.objects.select_related("currency").prefetch_related(
+            "payments",
+            "accommodations__cost_currency",
+            "expenses__currency",
         )
         received = defaultdict(Decimal)
         outstanding = defaultdict(Decimal)
@@ -282,7 +286,9 @@ class DashboardView(APIView):
         profit = defaultdict(Decimal)
         upcoming = 0
         confirmed = 0
+        booking_count = 0
         for booking in bookings:
+            booking_count += 1
             summary = client_payment_summary(booking)
             received[booking.currency.code] += summary["paid"]
             outstanding[booking.currency.code] += summary["balance"]
@@ -290,21 +296,22 @@ class DashboardView(APIView):
                 confirmed += 1
                 if resolved_safari_status(booking) == Booking.SafariStatus.WAITING_FOR_SAFARI:
                     upcoming += 1
-            result = booking_profit(booking)
+            result = booking_profit(booking, include_vendor=False)
             profit[result["gross_profit"]["currency"]] += result["gross_profit"]["amount"]
             for bucket in result["hotel_costs"]:
                 expenses[bucket["currency"]] += bucket["amount"]
             for bucket in result["other_expenses"]:
                 expenses[bucket["currency"]] += bucket["amount"]
         paid_cash = ClientPayment.objects.values("currency__code").annotate(total=Sum("amount"))
-        open_invoices = 0
-        overdue = 0
-        for invoice in Invoice.objects.exclude(status=Invoice.Status.CANCELLED).prefetch_related("payments"):
-            status = invoice_effective_status(invoice)
-            if status in ("sent", "partially_paid", "overdue"):
-                open_invoices += 1
-            if status == "overdue":
-                overdue += 1
+        paid = Coalesce(
+            Sum("payments__amount_applied"),
+            Value(0, output_field=DecimalField(max_digits=14, decimal_places=2)),
+        )
+        open_qs = Invoice.objects.exclude(
+            status__in=[Invoice.Status.CANCELLED, Invoice.Status.DRAFT]
+        ).annotate(paid=paid)
+        open_invoices = open_qs.filter(paid__lt=F("total_amount")).count()
+        overdue = open_qs.filter(paid__lt=F("total_amount"), due_date__lt=today).count()
         return Response(
             {
                 "leads": Lead.objects.count(),
@@ -313,7 +320,7 @@ class DashboardView(APIView):
                 "confirmed_bookings": confirmed,
                 "completed_bookings": Booking.objects.filter(overall_status=Booking.Overall.COMPLETED).count(),
                 "upcoming_safaris": upcoming,
-                "bookings": len(bookings),
+                "bookings": booking_count,
                 "open_invoices": open_invoices,
                 "overdue_invoices": overdue,
                 "payments_received": [{"currency": code, "amount": money_amount_str(amount)} for code, amount in received.items()],

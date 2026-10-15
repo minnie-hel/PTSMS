@@ -166,3 +166,25 @@ class CompanySerializer(serializers.ModelSerializer):
 
     def get_logo_wide_dark_url(self, obj):
         return self._variants(obj)["logo_wide_dark_url"]
+
+
+class PublicBrandingSerializer(CompanySerializer):
+    """Login page only: name, welcome, logos, colours. No bank or tax details."""
+
+    class Meta(CompanySerializer.Meta):
+        fields = [
+            "name",
+            "tagline",
+            "welcome_title",
+            "welcome_text",
+            "logo_url",
+            "logo_dark_url",
+            "logo_mark_url",
+            "logo_mark_dark_url",
+            "logo_wide_url",
+            "logo_wide_dark_url",
+            "primary_color",
+            "secondary_color",
+        ]
+        extra_kwargs = {}
+        read_only_fields = fields
