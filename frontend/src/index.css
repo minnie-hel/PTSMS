@@ -212,13 +212,13 @@ a { color: inherit; }
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--side-ink);
+  color: var(--bad);
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
   text-align: left;
 }
-.side-logout:hover { background: var(--hover); color: var(--bad); }
+.side-logout:hover { background: color-mix(in srgb, var(--bad) 12%, var(--hover)); color: var(--bad); }
 .side-logout .nav-icon { color: inherit; }
 .shell.collapsed .side-footer { padding: 10px 8px; }
 .shell.collapsed .side-logout { justify-content: center; padding: 9px 0; }
@@ -300,6 +300,7 @@ a { color: inherit; }
   cursor: pointer;
   font: inherit;
 }
+.topbar-logout { color: var(--bad); }
 .topbar-panel a:hover,
 .topbar-logout:hover { background: var(--hover); }
 .topbar-panel-profile { min-width: 220px; }
