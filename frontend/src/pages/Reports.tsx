@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { clearSession, getAccess } from "../api"
 import { LogoImage, useCompany } from "../company"
-import { PageTitle } from "../ui"
+import { money, PageTitle } from "../ui"
 import { emitAppError } from "../errors"
 import { ModuleCard, type Tone } from "../cards"
 import {
@@ -172,6 +172,20 @@ export function ModuleReportsPage() {
             </div>
           </header>
           {loading ? <p>Loading…</p> : null}
+          {report?.extra && Array.isArray((report.extra as { totals?: { currency: string; cash_in: string; cash_out: string; balance: string }[] }).totals) ? (
+            <div className="cashbook-totals">
+              {((report.extra as { totals: { currency: string; cash_in: string; cash_out: string; balance: string }[] }).totals).map((item) => (
+                <section className="cashbook-total-card" key={item.currency}>
+                  <h2>{item.currency}</h2>
+                  <div className="cashbook-total-grid">
+                    <div><span>Total cash in</span><strong className="cash-in">{money(item.cash_in, item.currency)}</strong></div>
+                    <div><span>Total cash out</span><strong className="cash-out">{money(item.cash_out, item.currency)}</strong></div>
+                    <div><span>Final balance</span><strong>{money(item.balance, item.currency)}</strong></div>
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : null}
           {report ? (
             <div className="table-wrap">
               <table>

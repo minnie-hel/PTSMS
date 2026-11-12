@@ -1,6 +1,7 @@
 import csv
 import io
 from datetime import datetime
+from decimal import Decimal
 
 from django.db.models import Count, Q, Sum
 from django.http import HttpResponse
@@ -593,35 +594,51 @@ def _expenses_report(user, generated):
 def _cashbook_report(user, generated):
     columns = [
         {"key": "date", "label": "Date"},
-        {"key": "direction", "label": "In / out"},
-        {"key": "kind", "label": "Type"},
-        {"key": "reference", "label": "Reference"},
-        {"key": "party", "label": "Party"},
-        {"key": "amount", "label": "Amount"},
+        {"key": "remark", "label": "Remark"},
+        {"key": "contact", "label": "Contact"},
+        {"key": "category", "label": "Category"},
+        {"key": "method", "label": "Mode"},
         {"key": "currency", "label": "Currency"},
-        {"key": "method", "label": "Method"},
-        {"key": "balance", "label": "Balance after"},
+        {"key": "cash_in", "label": "Cash in"},
+        {"key": "cash_out", "label": "Cash out"},
+        {"key": "balance", "label": "Balance"},
     ]
     rows = []
     payload = cashbook()
-    for entries in payload["books"].values():
+    totals = []
+    for code, entries in payload["books"].items():
+        cash_in = sum((entry["money_in"] or Decimal("0")) for entry in entries)
+        cash_out = sum((entry["money_out"] or Decimal("0")) for entry in entries)
+        totals.append(
+            {
+                "currency": code,
+                "cash_in": str(cash_in),
+                "cash_out": str(cash_out),
+                "balance": str(payload["balances"].get(code, 0)),
+            }
+        )
         for entry in entries:
             money_in = entry["money_in"] or 0
             money_out = entry["money_out"] or 0
             rows.append(
                 {
                     "date": _date(entry["date"]),
-                    "direction": "In" if money_in > 0 else "Out",
-                    "kind": entry["category"],
-                    "reference": entry.get("reference", ""),
-                    "party": entry.get("description", ""),
-                    "amount": str(money_in if money_in > 0 else money_out),
-                    "currency": entry["currency"],
+                    "remark": entry.get("description", ""),
+                    "contact": entry.get("contact", ""),
+                    "category": entry["category"],
                     "method": entry.get("method", ""),
+                    "currency": entry["currency"],
+                    "cash_in": str(money_in) if money_in else "",
+                    "cash_out": str(money_out) if money_out else "",
                     "balance": str(entry["balance"]),
                 }
             )
-    return _pack("cashbook", "Cashbook", "Finance", generated, columns, rows)
+    dates = [row["date"] for row in rows if row["date"]]
+    extra = {
+        "totals": totals,
+        "duration": f"{min(dates)} – {max(dates)}" if dates else "",
+    }
+    return _pack("cashbook", "Cashbook", "Finance", generated, columns, rows, extra=extra)
 
 
 def _profitability_report(user, generated):
@@ -648,8 +665,8 @@ def _profitability_report(user, generated):
     return _pack("profitability", "Profitability", "Finance", generated, columns, rows)
 
 
-def _pack(module, title, group, generated, columns, rows):
-    return {
+def _pack(module, title, group, generated, columns, rows, extra=None):
+    payload = {
         "module": module,
         "title": title,
         "group": group,
@@ -658,6 +675,9 @@ def _pack(module, title, group, generated, columns, rows):
         "rows": rows,
         "row_count": len(rows),
     }
+    if extra:
+        payload["extra"] = extra
+    return payload
 
 
 def csv_response(report: dict) -> HttpResponse:

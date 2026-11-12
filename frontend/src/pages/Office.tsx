@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { api, apiList, emptyToNull } from "../api"
 import { useAuth } from "../auth"
-import { DocumentCompanyLine } from "../company"
+import { DocumentCompanyLine, useCompany } from "../company"
 import { Badge, Banner, Field, money, Modal, PageTitle } from "../ui"
-import { InvoiceDocument, ScreenToolbar, type InvoiceDoc } from "../documents"
+import { CashbookReport, InvoiceDocument, ScreenToolbar, type CashbookLine, type CashbookTotal, type InvoiceDoc } from "../documents"
 import { exportInvoiceDocument, exportTable } from "../export"
 import { DetailModal, EmptyRow, ListToolbar, RecordForm, RowActions, useClientPagination, useListScreen, type ListFilterField } from "../lists"
 import { INVOICE_STATUS_TABS, ITINERARY_STATUS_TABS, QUOTATION_STATUS_TABS, VENDOR_STATUS_TABS, monthFilterField } from "../listTabs"
@@ -1267,6 +1267,7 @@ export function ExpensesPage() {
 /* ---------------------------------------------------- cashbook & profit */
 
 export function CashbookPage() {
+  const { company } = useCompany()
   const [currencies, setCurrencies] = useState<Row[]>([])
   const [methods, setMethods] = useState<Row[]>([])
   const [currency, setCurrency] = useState("")
@@ -1282,8 +1283,6 @@ export function CashbookPage() {
     if (method) query.set("method", method)
     api<{ balances: Record<string, string>; books: Record<string, Row[]> }>(`/api/cashbook/?${query.toString()}`).then(setData)
   }, [currency, method])
-  const code = currency || Object.keys(data?.books || {})[0] || ""
-  const allRows = code && data ? data.books[code] || [] : []
   const cashbookFilters = useMemo(
     () => [
       { key: "currency", label: "All currencies", options: currencies.map((item) => ({ value: String(item.code), label: String(item.code) })) },
@@ -1293,44 +1292,127 @@ export function CashbookPage() {
     [currencies, methods],
   )
   const [month, setMonth] = useState("")
-  const filteredRows = useMemo(
-    () => allRows.filter((row) => !month || String(row.date).startsWith(month)),
-    [allRows, month],
-  )
-  const pag = useClientPagination(filteredRows)
+  const allRows = useMemo(() => {
+    if (!data) return [] as CashbookLine[]
+    const codes = currency ? [currency] : Object.keys(data.books)
+    const rows = codes.flatMap((code) => (data.books[code] || []).map((row) => ({
+      date: String(row.date),
+      description: String(row.description || ""),
+      contact: String(row.contact || ""),
+      category: String(row.category || ""),
+      method: String(row.method || ""),
+      currency: String(row.currency || code),
+      money_in: row.money_in as string,
+      money_out: row.money_out as string,
+      balance: row.balance as string,
+      booking: String(row.booking || ""),
+      kind: row.kind,
+      id: row.id,
+    })))
+    return rows
+      .filter((row) => !month || String(row.date).startsWith(month))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+  }, [data, currency, month])
+  const totals: CashbookTotal[] = useMemo(() => {
+    const buckets: Record<string, { cash_in: number; cash_out: number }> = {}
+    for (const row of allRows) {
+      const bucket = buckets[row.currency] || { cash_in: 0, cash_out: 0 }
+      bucket.cash_in += Number(row.money_in) || 0
+      bucket.cash_out += Number(row.money_out) || 0
+      buckets[row.currency] = bucket
+    }
+    return Object.entries(buckets).map(([code, bucket]) => ({
+      currency: code,
+      cash_in: String(bucket.cash_in),
+      cash_out: String(bucket.cash_out),
+      balance: String(bucket.cash_in - bucket.cash_out),
+    }))
+  }, [allRows])
+  const pag = useClientPagination(allRows)
   return (
     <>
-      <PageTitle title="Cashbook"/>
-      <ListToolbar
-        page={pag.page}
-        pageSize={pag.pageSize}
-        total={pag.total}
-        onPageChange={pag.setPage}
-        filterFields={cashbookFilters}
-        filterValues={{ currency, method, month }}
-        onFilterChange={(key, value) => {
-          if (key === "currency") setCurrency(value)
-          else if (key === "method") setMethod(value)
-          else if (key === "month") setMonth(value)
-        }}
-      />
-      {data ? <p>Balances: {Object.entries(data.balances).map(([key, value]) => money(value, key)).join(" · ") || "No movement yet"}</p> : null}
-      <div className="table-wrap">
-        <table>
-          <thead><tr><th>Date</th><th>Description</th><th>In</th><th>Out</th><th>Balance</th></tr></thead>
-          <tbody>
-            {pag.rows.map((row, index) => (
-              <tr key={`${row.kind}-${row.id}-${index}`}>
-                <td>{String(row.date)}</td>
-                <td>{String(row.description)}<div className="muted">{String(row.booking || "")}</div></td>
-                <td>{Number(row.money_in) ? money(row.money_in as string, code) : ""}</td>
-                <td>{Number(row.money_out) ? money(row.money_out as string, code) : ""}</td>
-                <td>{money(row.balance as string, code)}</td>
+      <PageTitle title="Cashbook" lede="All cash in and cash out, in every currency." />
+      <div className="cashbook-screen">
+        <ScreenToolbar
+          onPrint={() => window.print()}
+          onExport={(format) =>
+            exportTable(
+              format,
+              "CashBook",
+              [
+                { key: "date", label: "Date" },
+                { key: "description", label: "Remark" },
+                { key: "contact", label: "Contact" },
+                { key: "category", label: "Category" },
+                { key: "method", label: "Mode" },
+                { key: "currency", label: "Currency" },
+                { key: "money_in", label: "Cash in" },
+                { key: "money_out", label: "Cash out" },
+                { key: "balance", label: "Balance" },
+              ],
+              allRows,
+            )
+          }
+        />
+        <ListToolbar
+          page={pag.page}
+          pageSize={pag.pageSize}
+          total={pag.total}
+          onPageChange={pag.setPage}
+          filterFields={cashbookFilters}
+          filterValues={{ currency, method, month }}
+          onFilterChange={(key, value) => {
+            if (key === "currency") setCurrency(value)
+            else if (key === "method") setMethod(value)
+            else if (key === "month") setMonth(value)
+          }}
+        />
+        <div className="cashbook-totals cashbook-totals-screen">
+          {totals.map((item) => (
+            <section className="cashbook-total-card" key={item.currency}>
+              <h2>{item.currency}</h2>
+              <div className="cashbook-total-grid">
+                <div><span>Total cash in</span><strong className="cash-in">{money(item.cash_in, item.currency)}</strong></div>
+                <div><span>Total cash out</span><strong className="cash-out">{money(item.cash_out, item.currency)}</strong></div>
+                <div><span>Final balance</span><strong>{money(item.balance, item.currency)}</strong></div>
+              </div>
+            </section>
+          ))}
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Remark</th>
+                <th>Contact</th>
+                <th>Category</th>
+                <th>Mode</th>
+                <th>Currency</th>
+                <th>Cash in</th>
+                <th>Cash out</th>
+                <th>Balance</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {pag.rows.map((row, index) => (
+                <tr key={`${row.currency}-${row.id}-${index}`}>
+                  <td>{String(row.date)}</td>
+                  <td>{String(row.description)}{row.booking ? <div className="muted">{String(row.booking)}</div> : null}</td>
+                  <td>{String(row.contact || "—")}</td>
+                  <td>{String(row.category || "—")}</td>
+                  <td>{String(row.method || "—")}</td>
+                  <td>{row.currency}</td>
+                  <td className="cash-in">{Number(row.money_in) ? money(row.money_in as string, row.currency) : ""}</td>
+                  <td className="cash-out">{Number(row.money_out) ? money(row.money_out as string, row.currency) : ""}</td>
+                  <td>{money(row.balance as string, row.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
+      <CashbookReport companyName={company.name || "Paul Tours Safari"} rows={allRows} totals={totals} />
     </>
   )
 }

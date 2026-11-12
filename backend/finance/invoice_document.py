@@ -118,9 +118,7 @@ def company_banks_for_invoice(company, currency=None):
     if currency:
         code = currency.code
         matching = [row for row in rows if row["currency_code"] == code]
-        if matching:
-            others = [row for row in rows if row["currency_code"] != code]
-            return matching + others
+        return matching
     return rows
 
 
@@ -140,6 +138,7 @@ def invoice_document(invoice, request=None) -> dict:
             "mode": payment.payment_method.name if payment.payment_method_id else "Payment",
             "amount": str(payment.amount),
             "amount_display": _money(payment.amount, payment.currency.code),
+            "currency_code": payment.currency.code,
             "account": payment.payment_method.name if payment.payment_method_id else "",
             "reference": payment.reference,
         }

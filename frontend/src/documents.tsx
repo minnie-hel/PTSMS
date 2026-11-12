@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import type { ExportFormat } from "./export"
 import { IconArrowRight } from "./icons"
+import { money } from "./ui"
 
 const FORMATS: { id: ExportFormat; label: string }[] = [
   { id: "pdf", label: "PDF (print)" },
@@ -145,7 +146,7 @@ export type InvoiceDoc = {
     city: string
     address: string
   }
-  payments: { date: string; mode: string; amount_display: string; account: string; reference: string }[]
+  payments: { date: string; mode: string; amount_display: string; account: string; reference: string; currency_code?: string }[]
 }
 
 export function InvoiceDocument({ doc }: { doc: InvoiceDoc }) {
@@ -225,18 +226,7 @@ export function InvoiceDocument({ doc }: { doc: InvoiceDoc }) {
 
       <section className="inv-bank">
         <h2>Bank Details</h2>
-        {(doc.company.banks?.length ? doc.company.banks : [{
-          currency_code: "",
-          account_name: doc.company.bank_account_name,
-          account_number: doc.company.bank_account_number,
-          iban: doc.company.bank_iban,
-          swift: doc.company.bank_swift,
-          bank_name: doc.company.bank_name,
-          branch: doc.company.bank_branch,
-          branch_code: doc.company.bank_branch_code,
-          correspondent: doc.company.bank_correspondent,
-          correspondent_swift: doc.company.bank_correspondent_swift,
-        }]).map((bank, index) => (
+        {(doc.company.banks || []).length ? (doc.company.banks || []).map((bank, index) => (
           <dl className="inv-bank-grid" key={`${bank.account_number}-${index}`}>
             {bank.currency_code ? <div><dt>Currency</dt><dd>{bank.currency_code}</dd></div> : null}
             <div><dt>Account Name</dt><dd>{bank.account_name}</dd></div>
@@ -249,7 +239,9 @@ export function InvoiceDocument({ doc }: { doc: InvoiceDoc }) {
             {bank.correspondent ? <div><dt>Corresponding Bank</dt><dd>{bank.correspondent}</dd></div> : null}
             {bank.correspondent_swift ? <div><dt>SWIFT Code</dt><dd>{bank.correspondent_swift}</dd></div> : null}
           </dl>
-        ))}
+        )) : (
+          <p className="muted">No bank account is set for {doc.currency_code}.</p>
+        )}
       </section>
 
       {terms.length ? (
@@ -267,12 +259,13 @@ export function InvoiceDocument({ doc }: { doc: InvoiceDoc }) {
         <section className="inv-payments">
           <h2>Payments</h2>
           <table>
-            <thead><tr><th>Date</th><th>Mode</th><th>Amount Received</th><th>Payment Account</th></tr></thead>
+            <thead><tr><th>Date</th><th>Mode</th><th>Currency</th><th>Amount Received</th><th>Payment Account</th></tr></thead>
             <tbody>
               {doc.payments.map((row, index) => (
                 <tr key={index}>
                   <td>{row.date}</td>
                   <td>{row.mode}</td>
+                  <td>{row.currency_code || doc.currency_code}</td>
                   <td>{row.amount_display}</td>
                   <td>{row.account || row.reference}</td>
                 </tr>
@@ -283,6 +276,114 @@ export function InvoiceDocument({ doc }: { doc: InvoiceDoc }) {
       ) : null}
 
       {doc.company.invoice_footer ? <footer className="inv-footer">{doc.company.invoice_footer}</footer> : null}
+    </article>
+  )
+}
+
+export type CashbookLine = {
+  date: string
+  description?: string
+  contact?: string
+  category?: string
+  method?: string
+  currency: string
+  money_in?: string | number
+  money_out?: string | number
+  balance?: string | number
+  booking?: string
+  id?: number
+}
+
+export type CashbookTotal = {
+  currency: string
+  cash_in: string | number
+  cash_out: string | number
+  balance: string | number
+}
+
+function cashDate(value: string) {
+  const parsed = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+}
+
+export function CashbookReport({
+  companyName,
+  rows,
+  totals,
+}: {
+  companyName: string
+  rows: CashbookLine[]
+  totals: CashbookTotal[]
+}) {
+  const dates = rows.map((row) => String(row.date)).filter(Boolean).sort()
+  const duration = dates.length ? `${cashDate(dates[0])} - ${cashDate(dates[dates.length - 1])}` : "—"
+  return (
+    <article className="cashbook-doc" id="cashbook-print-root">
+      <header className="cashbook-head">
+        <p className="cashbook-company">{companyName}</p>
+        <h1>Cashbook</h1>
+        <p className="cashbook-duration">Duration: {duration}</p>
+      </header>
+      <div className="cashbook-totals">
+        {totals.map((item) => (
+          <section className="cashbook-total-card" key={item.currency}>
+            <h2>{item.currency}</h2>
+            <div className="cashbook-total-grid">
+              <div>
+                <span>Total cash in</span>
+                <strong className="cash-in">{money(item.cash_in, item.currency)}</strong>
+              </div>
+              <div>
+                <span>Total cash out</span>
+                <strong className="cash-out">{money(item.cash_out, item.currency)}</strong>
+              </div>
+              <div>
+                <span>Final balance</span>
+                <strong>{money(item.balance, item.currency)}</strong>
+              </div>
+            </div>
+          </section>
+        ))}
+      </div>
+      <p className="cashbook-count">Total no. of entries: {rows.length}</p>
+      <table className="cashbook-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Remark</th>
+            <th>Contact</th>
+            <th>Category</th>
+            <th>Mode</th>
+            <th>Currency</th>
+            <th>Cash in</th>
+            <th>Cash out</th>
+            <th>Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => {
+            const incoming = Number(row.money_in)
+            const outgoing = Number(row.money_out)
+            return (
+              <tr key={`${row.currency}-${index}`}>
+                <td>{cashDate(String(row.date))}</td>
+                <td>{row.description || "—"}</td>
+                <td>{row.contact || "—"}</td>
+                <td>{row.category || "—"}</td>
+                <td>{row.method || "—"}</td>
+                <td>{row.currency}</td>
+                <td className="cash-in">{incoming ? money(row.money_in, row.currency) : ""}</td>
+                <td className="cash-out">{outgoing ? money(row.money_out, row.currency) : ""}</td>
+                <td>{money(row.balance, row.currency)}</td>
+              </tr>
+            )
+          })}
+          {rows.length === 0 ? (
+            <tr><td colSpan={9} className="empty-cell">No cash movement yet.</td></tr>
+          ) : null}
+        </tbody>
+      </table>
     </article>
   )
 }

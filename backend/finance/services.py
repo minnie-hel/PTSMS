@@ -145,7 +145,7 @@ def cashbook(currency_code=None, method_id=None):
     vendors = VendorPayment.objects.select_related(
         "currency", "payment_method", "accommodation__booking", "accommodation__vendor"
     )
-    expenses = Expense.objects.select_related("currency", "payment_method", "booking", "category")
+    expenses = Expense.objects.select_related("currency", "payment_method", "booking", "booking__client", "category")
     if currency_code:
         payments = payments.filter(currency__code=currency_code)
         vendors = vendors.filter(currency__code=currency_code)
@@ -159,6 +159,7 @@ def cashbook(currency_code=None, method_id=None):
             {
                 "date": item.paid_on,
                 "description": f"Client payment {item.client.full_name}",
+                "contact": item.client.full_name,
                 "category": "Client payment",
                 "reference": item.reference,
                 "money_in": item.amount,
@@ -175,6 +176,7 @@ def cashbook(currency_code=None, method_id=None):
             {
                 "date": item.paid_on,
                 "description": f"Hotel payment {item.accommodation.vendor.name}",
+                "contact": item.accommodation.vendor.name,
                 "category": "Vendor payment",
                 "reference": item.reference,
                 "money_in": Decimal("0"),
@@ -191,6 +193,7 @@ def cashbook(currency_code=None, method_id=None):
             {
                 "date": item.spent_on,
                 "description": item.description or "Expense",
+                "contact": item.booking.client.full_name if item.booking_id else "",
                 "category": item.category.name if item.category_id else "Expense",
                 "reference": item.reference,
                 "money_in": Decimal("0"),
